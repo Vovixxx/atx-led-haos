@@ -74,6 +74,7 @@ async def test_discover_inventory_includes_groups_and_best_effort_scenes(
         {
             ("GET", "http://192.168.1.50/dali/api/addresses"): FakeResponse(200, addresses_payload),
             ("GET", "http://192.168.1.50/dali/api/devices"): FakeResponse(200, devices_payload),
+            ("GET", "http://192.168.1.50/dali/api/groups"): FakeResponse(200, {}),
             ("GET", "http://192.168.1.50/dali/api/scenes"): FakeResponse(200, scenes_payload),
         }
     )
@@ -91,6 +92,7 @@ async def test_missing_scenes_endpoint_does_not_fail_inventory(
         {
             ("GET", "http://192.168.1.50/dali/api/addresses"): FakeResponse(200, addresses_payload),
             ("GET", "http://192.168.1.50/dali/api/devices"): FakeResponse(200, devices_payload),
+            ("GET", "http://192.168.1.50/dali/api/groups"): FakeResponse(404, {"error": "missing"}),
             ("GET", "http://192.168.1.50/dali/api/scenes"): FakeResponse(404, {"error": "missing"}),
         }
     )
@@ -229,3 +231,66 @@ async def test_set_device_level_posts_hub_level() -> None:
     assert method == "POST"
     assert url.endswith("/dali/api/devices/0_s_51")
     assert kwargs["json"] == {"level": 180}
+
+
+async def test_discover_inventory_merges_groups_api_when_devices_omit_them(
+    addresses_payload: dict, devices_payload: dict, scenes_payload: dict
+) -> None:
+    devices = dict(devices_payload)
+    devices.pop("0_g_1")
+    groups_api = {
+        "0_g_1": {
+            "address": [0, "group", 1],
+            "channel": 0,
+            "dev_name": "Group 1",
+            "hue_name": "Hall Spots",
+            "dev_on": False,
+            "level": 40,
+            "device_ids": [1],
+        }
+    }
+    session = FakeSession(
+        {
+            ("GET", "http://192.168.1.50/dali/api/addresses"): FakeResponse(200, addresses_payload),
+            ("GET", "http://192.168.1.50/dali/api/devices"): FakeResponse(200, devices),
+            ("GET", "http://192.168.1.50/dali/api/groups"): FakeResponse(200, groups_api),
+            ("GET", "http://192.168.1.50/dali/api/scenes"): FakeResponse(200, scenes_payload),
+        }
+    )
+    client = _client(session)
+    _lights, groups, _scenes = await client.async_discover_inventory()
+    dali = next(group for group in groups if group.device_id == "0_g_1")
+    assert dali.name == "Hall Spots"
+    assert dali.is_on is False
+    assert dali.stored_level == 40
+    assert "0_s_1" in dali.members
+
+
+async def test_set_group_color_temp_writes_member_devices(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    from atx_led.models import reconcile_groups, reconcile_lights
+
+    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
+    group = next(
+        item
+        for item in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
+        if item.device_id == "0_g_1"
+    )
+    group = group.__class__(
+        **{
+            **group.__dict__,
+            "has_color_temp": True,
+            "members": ("0_s_1", "0_s_11"),
+        }
+    )
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
+        }
+    )
+    client = _client(session)
+    await client.async_set_group_color_temp(group, lights, 3000)
+    posted = [url for _method, url, _kwargs in session.calls]
+    assert posted == ["http://192.168.1.50/dali/api/devices/0_s_1"]
+    assert session.calls[0][2]["json"] == {"color_temp_k": 3000}

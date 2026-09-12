@@ -40,7 +40,11 @@ async def async_get_config_entry_diagnostics(
                 "group_addr": group.group_addr,
                 "kind": group.kind,
                 "is_on": group.is_on,
+                "stored_level": group.stored_level,
+                "members": list(group.members),
                 "member_count": len(group.members),
+                "state_source": group.state_source,
+                "has_color_temp": group.has_color_temp,
                 "available": group.available,
             }
             for group in coordinator.data.groups.values()

@@ -65,6 +65,7 @@ class GroupDevice:
     user_cool: int | None
     members: tuple[str, ...]
     available: bool = True
+    state_source: str = "unknown"
 
     @property
     def unique_suffix(self) -> str:
@@ -125,6 +126,17 @@ def _as_int(value: object, default: int) -> int:
     return default if parsed is None else parsed
 
 
+def _preferred_name(*candidates: object, fallback: str) -> str:
+    """Pick the first non-empty label. Prefer Hue/user names over generic Group N."""
+    for candidate in candidates:
+        if candidate is None or candidate is False:
+            continue
+        text = str(candidate).strip()
+        if text:
+            return text
+    return fallback
+
+
 def parse_device(device_id: str, raw: dict) -> LightDevice | None:
     if not isinstance(raw, dict):
         return None
@@ -135,7 +147,7 @@ def parse_device(device_id: str, raw: dict) -> LightDevice | None:
             short_addr = _as_optional_int(address[2])
     if short_addr is None:
         return None
-    name = str(raw.get("dev_name") or device_id).strip()
+    name = _preferred_name(raw.get("hue_name"), raw.get("dev_name"), fallback=device_id)
     is_on_raw = raw.get("dev_on")
     is_on = None if is_on_raw is None else bool(is_on_raw)
     return LightDevice(
@@ -170,16 +182,53 @@ def parse_addr_id(device_id: str) -> tuple[int, str, int] | None:
     return (int(match.group(1)), match.group(2), int(match.group(3)))
 
 
+def _membership_from_item(item: object) -> list[int]:
+    if isinstance(item, bool):
+        return []
+    parsed = _as_optional_int(item)
+    if parsed is not None:
+        return [parsed] if 0 <= parsed <= GROUP_ADDR_MAX else []
+    if isinstance(item, str):
+        addr = parse_addr_id(item)
+        if addr is not None and addr[1] == "g" and 0 <= addr[2] <= GROUP_ADDR_MAX:
+            return [addr[2]]
+        return []
+    if isinstance(item, dict):
+        if item.get("key"):
+            return _membership_from_item(item["key"])
+        for key in ("group", "group_addr"):
+            if key in item:
+                return _membership_from_item(item[key])
+    return []
+
+
 def _parse_group_membership(value: object) -> tuple[int, ...]:
     if isinstance(value, list):
+        if len(value) == GROUP_ADDR_MAX + 1 and all(item in (0, 1, True, False) for item in value):
+            return tuple(
+                index for index, item in enumerate(value) if item not in (0, False, None)
+            )
         groups: list[int] = []
         for item in value:
-            parsed = _as_optional_int(item)
-            if parsed is None or parsed < 0 or parsed > GROUP_ADDR_MAX:
-                continue
-            if parsed not in groups:
-                groups.append(parsed)
+            for group_addr in _membership_from_item(item):
+                if group_addr not in groups:
+                    groups.append(group_addr)
         return tuple(groups)
+    if isinstance(value, dict):
+        groups: list[int] = []
+        for key, item in value.items():
+            if item in (False, 0, None, ""):
+                continue
+            for group_addr in _membership_from_item(key):
+                if group_addr not in groups:
+                    groups.append(group_addr)
+            if item not in (True, 1):
+                for group_addr in _membership_from_item(item):
+                    if group_addr not in groups:
+                        groups.append(group_addr)
+        return tuple(groups)
+    if isinstance(value, str):
+        return tuple(_membership_from_item(value))
     bitmask = _as_optional_int(value)
     if bitmask is None or bitmask <= 0:
         return ()
@@ -199,7 +248,7 @@ def _address_keys(addresses: dict, category: str) -> list[tuple[str, str]]:
     return result
 
 
-def _member_ids(value: object) -> tuple[str, ...]:
+def _member_ids(value: object, channel: int = 0) -> tuple[str, ...]:
     if isinstance(value, list):
         members: list[str] = []
         for item in value:
@@ -209,6 +258,13 @@ def _member_ids(value: object) -> tuple[str, ...]:
                 key = str(item["key"])
                 if key and key not in members:
                     members.append(key)
+            else:
+                short_addr = _as_optional_int(item)
+                if short_addr is None or not 0 <= short_addr <= SHORT_ADDR_MAX:
+                    continue
+                member_id = f"{channel}_s_{short_addr}"
+                if member_id not in members:
+                    members.append(member_id)
         return tuple(members)
     if isinstance(value, str) and value:
         return (value,)
@@ -240,14 +296,18 @@ def parse_group(
             group_addr = _as_optional_int(address[2]) if group_addr is None else group_addr
         if group_addr is None:
             group_addr = _as_optional_int(raw.get("short_addr") or raw.get("group_addr"))
-        name = str(raw.get("dev_name") or name_fallback or device_id).strip()
+        name = _preferred_name(
+            raw.get("hue_name"), raw.get("dev_name"), name_fallback, fallback=device_id
+        )
         is_on_raw = raw.get("dev_on")
         is_on = None if is_on_raw is None else bool(is_on_raw)
         members = (
-            _member_ids(raw.get("members"))
-            or _member_ids(raw.get("lights"))
-            or _member_ids(raw.get("devices"))
+            _member_ids(raw.get("members"), channel)
+            or _member_ids(raw.get("lights"), channel)
+            or _member_ids(raw.get("devices"), channel)
+            or _member_ids(raw.get("device_ids"), channel)
         )
+        stored_level = _as_optional_int(raw.get("level"))
         return GroupDevice(
             device_id=device_id,
             channel=channel,
@@ -255,7 +315,7 @@ def parse_group(
             kind=kind,
             name=name,
             is_on=is_on,
-            stored_level=_as_optional_int(raw.get("level")),
+            stored_level=stored_level,
             min_level=_as_int(raw.get("min_level"), 1),
             max_level=_as_int(raw.get("max_level"), 254),
             has_color_temp=_as_bool(raw.get("has_color_temp")),
@@ -263,6 +323,7 @@ def parse_group(
             user_warm=_as_optional_int(raw.get("user_warm")),
             user_cool=_as_optional_int(raw.get("user_cool")),
             members=members,
+            state_source="hub" if is_on is not None or stored_level is not None else "unknown",
         )
     if group_addr is None:
         return None
@@ -281,6 +342,7 @@ def parse_group(
         user_warm=None,
         user_cool=None,
         members=(),
+        state_source="unknown",
     )
 
 
@@ -309,6 +371,52 @@ def _infer_group_members(
     return updated if changed else groups
 
 
+def _group_device_record(
+    devices: dict, device_id: str, channel: int | None, group_addr: int | None
+) -> dict | None:
+    """Find a group record under the hub id or a few observed alternate keys."""
+    parsed_id = parse_addr_id(device_id)
+    marker = parsed_id[1] if parsed_id is not None else None
+    if marker not in {"g", "v"}:
+        marker = None
+    candidates = [device_id]
+    if parsed_id is not None:
+        channel = parsed_id[0] if channel is None else channel
+        group_addr = parsed_id[2] if group_addr is None else group_addr
+    if marker is not None and channel is not None and group_addr is not None:
+        candidates.append(f"{channel}_{marker}_{group_addr}")
+    for key in candidates:
+        raw = devices.get(key)
+        if isinstance(raw, dict):
+            return raw
+    if channel is None or group_addr is None:
+        return None
+    wanted_address = {"group", "g"} if marker == "g" else {"virtual", "v"} if marker == "v" else set()
+    for key, raw in devices.items():
+        if not isinstance(raw, dict):
+            continue
+        parsed = parse_addr_id(str(key))
+        if (
+            parsed is not None
+            and parsed[0] == channel
+            and parsed[2] == group_addr
+            and (marker is None or parsed[1] == marker)
+            and parsed[1] in {"g", "v"}
+        ):
+            return raw
+        address = raw.get("address")
+        if (
+            wanted_address
+            and isinstance(address, list)
+            and len(address) >= 3
+            and address[1] in wanted_address
+            and _as_optional_int(address[2]) == group_addr
+            and _as_int(raw.get("channel"), channel) == channel
+        ):
+            return raw
+    return None
+
+
 def reconcile_groups(
     addresses: dict, devices: dict, lights: list[LightDevice] | None = None
 ) -> list[GroupDevice]:
@@ -324,7 +432,13 @@ def reconcile_groups(
         for device_id, name in _address_keys(addresses if isinstance(addresses, dict) else {}, category):
             if device_id in seen or device_id == "all":
                 continue
-            raw = devices.get(device_id)
+            parsed = parse_addr_id(device_id)
+            raw = _group_device_record(
+                devices,
+                device_id,
+                parsed[0] if parsed else None,
+                parsed[2] if parsed else None,
+            )
             group = parse_group(
                 device_id,
                 raw if isinstance(raw, dict) else None,
@@ -337,6 +451,7 @@ def reconcile_groups(
             result.append(group)
     if lights:
         result = _infer_group_members(result, lights)
+        result = [derive_group_state(group, {light.device_id: light for light in lights}) for group in result]
     return result
 
 
@@ -541,6 +656,8 @@ def apply_device_patch(device: LightDevice, data: dict) -> LightDevice:
         updates["stored_level"] = _as_optional_int(data["level"])
     if "dev_name" in data and data["dev_name"] not in (None, ""):
         updates["name"] = str(data["dev_name"]).strip()
+    if data.get("hue_name") not in (None, ""):
+        updates["name"] = str(data["hue_name"]).strip()
     if "color_temp_k" in data:
         updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
     if "dev_status" in data:
@@ -574,22 +691,41 @@ def apply_group_patch(group: GroupDevice, data: dict) -> GroupDevice:
     updates: dict[str, object] = {}
     if "dev_on" in data:
         updates["is_on"] = bool(data["dev_on"])
+        updates["state_source"] = "hub"
     if "level" in data:
         updates["stored_level"] = _as_optional_int(data["level"])
+        updates["state_source"] = "hub"
     if "dev_name" in data and data["dev_name"] not in (None, ""):
         updates["name"] = str(data["dev_name"]).strip()
+    if data.get("hue_name") not in (None, ""):
+        updates["name"] = str(data["hue_name"]).strip()
     if "color_temp_k" in data:
         updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
     members = (
-        _member_ids(data.get("members"))
-        or _member_ids(data.get("lights"))
-        or _member_ids(data.get("devices"))
+        _member_ids(data.get("members"), group.channel)
+        or _member_ids(data.get("lights"), group.channel)
+        or _member_ids(data.get("devices"), group.channel)
+        or _member_ids(data.get("device_ids"), group.channel)
     )
     if members:
         updates["members"] = members
     if not updates:
         return group
     return replace(group, **updates)
+
+
+def _resolve_group_patch_id(addr: str, groups: dict[str, GroupDevice]) -> str | None:
+    if addr in groups:
+        return addr
+    parsed = parse_addr_id(addr)
+    if parsed is None or parsed[1] not in {"g", "v"}:
+        return None
+    channel, marker, group_addr = parsed
+    kind = GROUP_KIND_DALI if marker == "g" else GROUP_KIND_VIRTUAL
+    for device_id, group in groups.items():
+        if group.channel == channel and group.group_addr == group_addr and group.kind == kind:
+            return device_id
+    return None
 
 
 def apply_group_patches(
@@ -601,14 +737,148 @@ def apply_group_patches(
     updated = dict(groups)
     changed = False
     for addr, data in patches:
-        current = updated.get(addr)
-        if current is None:
+        device_id = _resolve_group_patch_id(addr, updated)
+        if device_id is None:
             continue
+        current = updated[device_id]
         merged = apply_group_patch(current, data)
         if merged is not current:
-            updated[addr] = merged
+            updated[device_id] = merged
             changed = True
     return updated if changed else groups
+
+
+def derive_group_state(
+    group: GroupDevice, lights: dict[str, LightDevice]
+) -> GroupDevice:
+    """Fill missing group on/level/CCT from member fixtures. Hub on/level win."""
+    members = [lights[member_id] for member_id in group.members if member_id in lights]
+    if not members and group.is_dali_group:
+        members = [
+            light
+            for light in lights.values()
+            if light.channel == group.channel and group.group_addr in light.group_membership
+        ]
+    updates: dict[str, object] = {}
+    if members and not group.members:
+        updates["members"] = tuple(light.device_id for light in members)
+    known = [light.is_on for light in members if light.is_on is not None]
+    any_on = any(known) if known else None
+    if any_on:
+        if group.is_on is not True:
+            updates["is_on"] = True
+            if group.state_source != "hub":
+                updates["state_source"] = "derived"
+        on_levels = [
+            light.stored_level
+            for light in members
+            if light.is_on and light.stored_level is not None
+        ]
+        if on_levels and group.stored_level != max(on_levels):
+            updates["stored_level"] = max(on_levels)
+            if group.state_source != "hub":
+                updates.setdefault("state_source", "derived")
+    elif group.state_source != "hub":
+        if known and group.is_on is not False:
+            updates["is_on"] = False
+            updates["state_source"] = "derived"
+        levels = [
+            light.stored_level
+            for light in members
+            if light.stored_level is not None
+        ]
+        if levels and (group.stored_level is None or group.stored_level != max(levels)):
+            updates["stored_level"] = max(levels)
+            updates.setdefault("state_source", "derived")
+        if members:
+            new_min = min(light.min_level for light in members)
+            new_max = max(light.max_level for light in members)
+            if new_min != group.min_level:
+                updates["min_level"] = new_min
+            if new_max != group.max_level:
+                updates["max_level"] = new_max
+    updates.update(_derive_group_color_temp(group, members))
+    if not updates:
+        return group
+    return replace(group, **updates)
+
+
+def _derive_group_color_temp(
+    group: GroupDevice, members: list[LightDevice]
+) -> dict[str, object]:
+    """Expose CCT on a group when member fixtures advertise it.
+
+    Hub group records often store ``color_temp_k`` without ``has_color_temp``.
+    Slider bounds are the intersection of member user ranges so the same
+    Kelvin is valid on every color-temp fixture in the group.
+    """
+    cct_members = [light for light in members if light.has_color_temp]
+    if not cct_members:
+        return {}
+    updates: dict[str, object] = {}
+    if not group.has_color_temp:
+        updates["has_color_temp"] = True
+    if group.color_temp_k is None:
+        kelvin_values = [
+            light.color_temp_k for light in cct_members if light.color_temp_k is not None
+        ]
+        if kelvin_values:
+            updates["color_temp_k"] = kelvin_values[0]
+    if not group.user_warm or not group.user_cool:
+        ranges = [
+            color_temp_range_kelvin(light.user_warm, light.user_cool)
+            for light in cct_members
+        ]
+        usable = [
+            (minimum, maximum)
+            for minimum, maximum in ranges
+            if minimum is not None and maximum is not None
+        ]
+        if usable:
+            min_k = max(minimum for minimum, _maximum in usable)
+            max_k = min(maximum for _minimum, maximum in usable)
+            if min_k < max_k:
+                updates["user_warm"] = round(1_000_000 / min_k)
+                updates["user_cool"] = round(1_000_000 / max_k)
+    return updates
+
+
+def apply_derived_group_states(
+    groups: dict[str, GroupDevice], lights: dict[str, LightDevice]
+) -> dict[str, GroupDevice]:
+    """Refresh derived group state after fixture or inventory updates."""
+    if not groups:
+        return groups
+    updated = dict(groups)
+    changed = False
+    for device_id, group in groups.items():
+        merged = derive_group_state(group, lights)
+        if merged is not group:
+            updated[device_id] = merged
+            changed = True
+    return updated if changed else groups
+
+
+def merge_group_records(devices: dict, groups_payload: object) -> dict:
+    """Copy best-effort `/dali/api/groups` records into the devices map."""
+    if not isinstance(devices, dict):
+        devices = {}
+    if not isinstance(groups_payload, dict):
+        return devices
+    merged = dict(devices)
+    changed = False
+    for key, raw in groups_payload.items():
+        if str(key) in {"ok", "Groups", "groups"}:
+            continue
+        if not isinstance(raw, dict) or key in merged:
+            continue
+        merged[key] = raw
+        changed = True
+    nested = groups_payload.get("Groups") or groups_payload.get("groups")
+    if isinstance(nested, dict):
+        extra = merge_group_records(merged, nested)
+        return extra
+    return merged if changed else devices
 
 
 def preserve_group_live_state(
@@ -624,12 +894,18 @@ def preserve_group_live_state(
             merged[device_id] = group
             continue
         updates: dict[str, object] = {}
-        if group.is_on is None and old.is_on is not None:
+        if old.state_source == "hub" and group.state_source != "hub":
             updates["is_on"] = old.is_on
-        if group.stored_level is None and old.stored_level is not None:
             updates["stored_level"] = old.stored_level
-        if group.color_temp_k is None and old.color_temp_k is not None:
             updates["color_temp_k"] = old.color_temp_k
+            updates["state_source"] = "hub"
+        else:
+            if group.is_on is None and old.is_on is not None:
+                updates["is_on"] = old.is_on
+            if group.stored_level is None and old.stored_level is not None:
+                updates["stored_level"] = old.stored_level
+            if group.color_temp_k is None and old.color_temp_k is not None:
+                updates["color_temp_k"] = old.color_temp_k
         if not group.members and old.members:
             updates["members"] = old.members
         merged[device_id] = replace(group, **updates) if updates else group

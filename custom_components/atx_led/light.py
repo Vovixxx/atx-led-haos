@@ -25,6 +25,7 @@ from .const import (
     ATTR_DALI_GROUP_KIND,
     ATTR_DALI_MEMBERS,
     ATTR_DALI_SHORT_ADDRESS,
+    ATTR_DALI_STATE_SOURCE,
     ATTR_DALI_STATUS,
 )
 from .coordinator import ATXLEDConfigEntry, ATXLEDCoordinator
@@ -222,6 +223,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 unique_id=self._attr_unique_id,
                 name=group.name if group else device_id,
                 hub_device_id=coordinator.hub_device_id,
+                model="DALI Group" if not group or group.is_dali_group else "Virtual Group",
             )
         )
         self._apply_capabilities(group)
@@ -277,6 +279,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
             ATTR_DALI_GROUP_ADDRESS: group.group_addr,
             ATTR_DALI_GROUP_KIND: group.kind,
             ATTR_DALI_MEMBERS: list(group.members),
+            ATTR_DALI_STATE_SOURCE: group.state_source,
         }
 
     async def _async_set_level(self, group: GroupDevice, level: int) -> None:
@@ -293,8 +296,9 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
             raise HomeAssistantError("Group is unavailable")
         try:
             if ATTR_COLOR_TEMP_KELVIN in kwargs and group.has_color_temp:
-                await self.coordinator.client.async_set_color_temp_k(
-                    group.device_id, int(kwargs[ATTR_COLOR_TEMP_KELVIN])
+                lights = self.coordinator.data.lights if self.coordinator.data else {}
+                await self.coordinator.client.async_set_group_color_temp(
+                    group, lights, int(kwargs[ATTR_COLOR_TEMP_KELVIN])
                 )
             if ATTR_BRIGHTNESS in kwargs:
                 level = ha_brightness_to_dali(

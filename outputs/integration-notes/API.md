@@ -99,7 +99,13 @@ Observed in web-interface source; not independently used by this integration:
 
 GET `/dali/api/scenes` is now requested during inventory. A missing or unusable payload must not fail light or group discovery. Scene records are parsed from an object map, a `Scenes` list, or `{key,value}` items. Recall uses DALI GO TO SCENE (`0x10`–`0x1F`) on a listed group or on member short addresses. Do not send broadcast `hFFxx` or `hFE00`.
 
-Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead.
+GET `/dali/api/groups` is requested best-effort. Records on this hub (and likely others) use `dev_name` such as `Group 5`, a friendlier `hue_name` when Hue is linked, `dev_on`/`level`, and `device_ids` as short addresses rather than `0_s_*` member lists. `/dali/api/devices` may omit group keys entirely. A missing groups endpoint must not fail inventory.
+
+Display names prefer `hue_name`, then `dev_name`, then the `/dali/api/addresses` label. That order is hub-agnostic: Hue-linked installs get room names, others keep `dev_name`.
+
+Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead. Do not treat a virtual group id as interchangeable with the DALI group that shares the same numeric index.
+
+Group records are often missing `has_color_temp`. If member fixtures advertise color temperature, the group light exposes Kelvin and writes `color_temp_k` to those members. Hub group `dev_on`/`level` win when present; otherwise on/off is derived from members until `/ws/dali/groups` sends a patch.
 
 Do not present remaining untested source-observed endpoints as integration controls.
 

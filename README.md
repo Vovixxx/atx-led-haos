@@ -1,6 +1,6 @@
 # ATX LED for Home Assistant OS
 
-Home Assistant OS custom integration for a local [ATX LED](https://atxled.com/) DALI hub. Setup discovers already commissioned lights and creates one light entity per fixture. It does not commission, readdress, or identify devices.
+Home Assistant OS custom integration for a local [ATX LED](https://atxled.com/) DALI hub. Setup discovers already commissioned fixtures, groups, and hub scenes. It does not commission, readdress, or identify devices.
 
 This repository is meant to be added as a **HACS custom repository** until it is submitted to the default HACS store.
 
@@ -24,14 +24,15 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 
 - One light entity per commissioned DALI fixture (not buttons, IO, or relays).
 - One light entity per DALI group and hub virtual group. The broadcast `all` target is not imported.
+- Group display names prefer the hub `hue_name` when present, then `dev_name`, then the addresses label.
 - One scene entity per hub scene that includes a DALI scene number.
 - Fixture on/off uses `POST /dali/api/send-raw` Direct Arc Power Control.
 - DALI group on/off uses group DAPC (`group * 2 + 0x80`). Virtual groups use the hub device `level` write.
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
-- Brightness changes while a light or group is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply.
-- Color-temperature fixtures and groups expose a Kelvin slider when the hub advertises it.
+- Brightness changes while a fixture is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply. DALI groups keep using group DAPC.
+- Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Groups expose Kelvin when member fixtures do; writes go to those members, not an unverified group device endpoint.
 - Scene recall sends DALI GO TO SCENE to a listed group or to member fixtures. It does not send broadcast `hFFxx`.
-- State updates immediately from `/ws/dali/devices` and `/ws/dali/groups` when the hub reports a change. HTTP inventory is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.
+- State updates immediately from `/ws/dali/devices` and `/ws/dali/groups` when the hub reports a change. HTTP inventory (`addresses`, `devices`, best-effort `groups` and `scenes`) is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.
 - Hub identity currently falls back to the host address. Use Reconfigure to change the IP without recreating entities.
 
 ## Development

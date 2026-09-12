@@ -6,4 +6,5 @@ __pycache__/
 work/
 outputs/*.json
 outputs/*.html
+outputs/hub-dump/
 outputs/integration-notes/*.json
