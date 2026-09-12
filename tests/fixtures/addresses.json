@@ -1,0 +1,13 @@
+{
+  "All": [{"key": "all", "value": "All lights"}],
+  "Buttons": [{"key": "0_s_99", "value": "Fake Button"}],
+  "Groups": [{"key": "0_g_1", "value": "Group 1"}],
+  "Lights": [
+    {"key": "0_s_1", "value": "Hall Light"},
+    {"key": "0_s_11", "value": "Cabinet Light"},
+    {"key": "0_s_21", "value": "Office Light"},
+    {"key": "0_s_16", "value": "Cove Light "}
+  ],
+  "Virtual Devices": [],
+  "Virtual Groups": [{"key": "0_v_0", "value": "Virtual Group 0"}]
+}

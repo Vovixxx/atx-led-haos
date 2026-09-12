@@ -1,0 +1,12 @@
+{
+  "domain": "atx_led",
+  "name": "ATX LED",
+  "codeowners": ["@Vovixxx"],
+  "config_flow": true,
+  "documentation": "https://github.com/Vovixxx/atx-led-haos",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Vovixxx/atx-led-haos/issues",
+  "requirements": [],
+  "version": "0.1.1"
+}

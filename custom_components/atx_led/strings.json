@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ATX LED Hub",
+        "description": "Enter the local hub address. Setup discovers already commissioned lights and does not turn them on, identify them, or change DALI addresses.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or hostname, for example 192.168.1.50",
+          "username": "Only needed if the hub API requires authentication",
+          "password": "Only needed if the hub API requires authentication"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure ATX LED Hub",
+        "description": "Update the hub address. Existing light entities are kept.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the ATX LED hub",
+      "invalid_auth": "Authentication failed",
+      "invalid_response": "The hub returned an unexpected response"
+    },
+    "abort": {
+      "already_configured": "This hub is already configured",
+      "reconfigure_successful": "Hub connection updated"
+    }
+  }
+}
