@@ -43,6 +43,6 @@ Some hub records contain values outside their listed user/physical range (for ex
 
 ## Updates and reliability
 
-Investigate WebSocket push updates; use paced polling if push cannot be verified. Reconnect without replaying old light-changing requests. Serialize DALI traffic and avoid overlapping scans. Enable additional entities without controlling them.
+The coordinator listens on `/ws/dali/devices` for immediate state. HTTP polling every 15 seconds remains the backup. Reconnect without replaying old light-changing requests. Serialize DALI traffic and avoid overlapping scans. Enable additional entities without controlling them.
 
 The development test harness remains restricted to channel 1/address 1 for light-changing tests. Production scope expansion and live tests on other lights require the user's explicit authorization.

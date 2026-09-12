@@ -66,10 +66,27 @@ Read-only opcodes used: status `90`, actual level `A0`, maximum `A1`, minimum `A
 
 Vendor material also describes `X` receive collisions, `Z` transmit collisions, `H` observed 16-bit packets, and other HAT diagnostic packets. Availability of all serial commands through HTTP is not verified.
 
+## Verified WebSocket push
+
+Unauthenticated `ws://192.168.1.50/ws/dali/devices` and `ws://192.168.1.50/ws/dali/groups` both return HTTP 101 and stay open. The web UI still requires HTTP auth; these sockets do not in this environment.
+
+No first-message subscribe is required. Sending trial payloads (`*`, `all`, `0_s_1`, `{}`, JSON addr objects) produced no replies and did not change Hall Light.
+
+`/ws/dali/devices` is idle until a fixture changes. It then sends a JSON **array of patches**, not a full inventory:
+
+```json
+[{"addr": "0_s_1", "data": {"channel": 0, "short_addr": 1, "dev_on": true, "level": 86, "address": [0, "single", 1], "dev_name": "Hall Light", "fail_level": 86, "power_on_level": 86}}]
+```
+
+Live observation (external on/off, not a command we sent): Cabinet Light `0_s_11` and Hall Light `0_s_1` each pushed `dev_on` true then false within a few seconds. Patches are partial: `dev_on` and `level` are present; capability flags and min/max are not. `level` can remain the last brightness while `dev_on` is false.
+
+`/ws/dali/groups` uses the same `{addr, data}` array shape (`0_g_0`, `0_g_1`, …). A full group snapshot was seen immediately on one connect and not on a later idle connect, so do not assume an initial snapshot. Group patches include `dev_on`, `level`, `color_temp_k`, and member lists.
+
+Wrong paths (`/ws/dali/devices/0_s_1`, query strings, trailing slash) drop the connection. Reconnect is a new socket; do not replay light-changing HTTP commands on reconnect.
+
 ## Observed in web-interface source; not independently API-tested
 
 - POST `/dali/api/devices/{id}` with fields such as `dev_on`, `level`, `color_temp_k`.
-- WebSocket paths `/ws/dali/devices` and `/ws/dali/groups`; first-message protocol, message schema, reconnect behavior and freshness remain unverified.
 - GET `/dali/api/scenes`.
 - JSON POST helper serializes the body and uses `Content-Type: application/json`.
 - Device controls use debounced writes. Basic view raw slider bounds are 0–254.

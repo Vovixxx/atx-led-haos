@@ -123,6 +123,28 @@ class ATXLEDClient:
     async def async_query_light(self, channel: int, short_addr: int) -> SendRawResult:
         return await self.async_send_raw(channel, query_status_level_max_min(short_addr))
 
+    @property
+    def websocket_devices_url(self) -> str:
+        return f"ws://{self.host}/ws/dali/devices"
+
+    async def async_open_devices_socket(self) -> Any:
+        """Open the devices push socket. Do not send frames; listen only."""
+        request_kwargs: dict[str, Any] = {"heartbeat": 30.0}
+        auth = self._auth()
+        if auth is not None:
+            request_kwargs["auth"] = auth
+        try:
+            return await self._session.ws_connect(
+                self.websocket_devices_url, **request_kwargs
+            )
+        except OSError as err:
+            raise ATXLEDConnectionError(str(err)) from err
+        except Exception as err:
+            name = type(err).__name__
+            if "ClientError" in name or "Timeout" in name:
+                raise ATXLEDConnectionError(str(err)) from err
+            raise
+
     async def async_set_color_temp_k(self, device_id: str, kelvin: int) -> Any:
         """Set color temperature using the hub device endpoint (source-observed)."""
         async with self._lock:

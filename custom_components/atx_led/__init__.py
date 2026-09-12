@@ -44,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ATXLEDConfigEntry) -> bo
         configuration_url=f"http://{coordinator.host}/dali/devices",
     )
     coordinator.hub_device_id = hub_device.id
+    coordinator.async_start_watch()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

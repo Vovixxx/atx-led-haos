@@ -26,7 +26,7 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 - On/off and brightness use `POST /dali/api/send-raw` Direct Arc Power Control.
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
 - Color-temperature fixtures expose a Kelvin slider.
-- State is polled from `/dali/api/devices` every 15 seconds. Failed reads become unavailable, not off.
+- State updates immediately from `/ws/dali/devices` when the hub reports a change. HTTP `/dali/api/devices` is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.
 - Hub identity currently falls back to the host address. Use Reconfigure to change the IP without recreating entities.
 
 ## Development

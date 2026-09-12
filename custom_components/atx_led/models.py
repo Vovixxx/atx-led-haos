@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import json
 from urllib.parse import urlparse
 
 
@@ -155,3 +156,63 @@ def color_temp_range_kelvin(
     if warm_k is None or cool_k is None or warm_k == cool_k:
         return (None, None)
     return (min(warm_k, cool_k), max(warm_k, cool_k))
+
+
+def parse_ws_patches(payload: object) -> list[tuple[str, dict]]:
+    """Decode a verified `/ws/dali/devices` JSON array into (addr, data) patches."""
+    if isinstance(payload, (bytes, bytearray)):
+        payload = payload.decode()
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, list):
+        return []
+    patches: list[tuple[str, dict]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        addr = item.get("addr")
+        data = item.get("data")
+        if isinstance(addr, str) and addr and isinstance(data, dict):
+            patches.append((addr, data))
+    return patches
+
+
+def apply_device_patch(device: LightDevice, data: dict) -> LightDevice:
+    """Merge a partial hub patch without dropping capabilities or dimming limits."""
+    updates: dict[str, object] = {}
+    if "dev_on" in data:
+        updates["is_on"] = bool(data["dev_on"])
+    if "level" in data:
+        updates["stored_level"] = _as_optional_int(data["level"])
+    if "dev_name" in data and data["dev_name"] not in (None, ""):
+        updates["name"] = str(data["dev_name"]).strip()
+    if "color_temp_k" in data:
+        updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
+    if "dev_status" in data:
+        updates["status"] = _as_optional_int(data["dev_status"])
+    if not updates:
+        return device
+    return replace(device, **updates)
+
+
+def apply_device_patches(
+    lights: dict[str, LightDevice], patches: list[tuple[str, dict]]
+) -> dict[str, LightDevice]:
+    """Apply patches to known lights only. Unknown addrs are ignored."""
+    if not patches:
+        return lights
+    updated = dict(lights)
+    changed = False
+    for addr, data in patches:
+        current = updated.get(addr)
+        if current is None:
+            continue
+        merged = apply_device_patch(current, data)
+        if merged is not current:
+            updated[addr] = merged
+            changed = True
+    return updated if changed else lights
+

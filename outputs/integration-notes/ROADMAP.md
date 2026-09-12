@@ -4,13 +4,13 @@
 
 Completed: raw control accepted and visually confirmed (percentage mismatch); inventory endpoints verified; direct state/level/min/max queries verified on all 39 known lights; hub color-capability snapshot saved.
 
-Remaining: hub identity, authentication variants, and push-update protocol. Brightness UI mapping is locked.
+Remaining: hub identity and authentication variants. Brightness UI mapping is locked. WebSocket push is verified.
 
 Acceptance: known raw command and displayed percentage agree; readback clearly distinguishes stored versus actual state. Live control tests require approval.
 
 ## 2. Async API client — implemented (offline)
 
-HTTP discovery, normalized device data, individual control encoding, error decoding and serialized send-raw requests live in `custom_components/atx_led`. Mock-based pytest coverage is in `tests/`. Live hub identity, authentication variants, and push updates remain later work.
+HTTP discovery, normalized device data, individual control encoding, error decoding and serialized send-raw requests live in `custom_components/atx_led`. Mock-based pytest coverage is in `tests/`. Live hub identity and authentication variants remain later work.
 
 Acceptance: mock-based tests pass without operating lights; partial device failures do not discard the entire inventory.
 
@@ -20,9 +20,9 @@ Manifest, config flow, hub device registration, automatic light entities, coordi
 
 Acceptance: HA OS loads the custom integration, setup creates eligible entities without controlling lights, and approved address-1 tests work.
 
-## 4. State synchronization
+## 4. State synchronization — implemented
 
-Verify push updates or implement paced polling. Handle wall-switch changes, outages, reloads, unload cleanup, reconnects and stale values.
+The coordinator listens on `/ws/dali/devices`, merges partial `{addr, data}` patches into known lights, and reconnects without replaying controls. HTTP inventory polling every 15 seconds remains the backup and the path for newly discovered fixtures.
 
 Acceptance: HA reflects external changes and recovery causes no unintended controls.
 

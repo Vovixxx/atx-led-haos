@@ -119,3 +119,8 @@ async def test_connection_error_wraps_os_error() -> None:
     client = ATXLEDClient(host="192.168.1.50", session=BoomSession({}))
     with pytest.raises(ATXLEDConnectionError):
         await client.async_get_devices()
+
+
+def test_devices_websocket_url_is_verified_path() -> None:
+    client = ATXLEDClient(host="192.168.1.50", session=FakeSession({}))
+    assert client.websocket_devices_url == "ws://192.168.1.50/ws/dali/devices"
