@@ -12,7 +12,7 @@ This repository is meant to be added as a **HACS custom repository** until it is
 4. Add, then download **ATX LED**.
 5. Restart Home Assistant.
 6. Settings → Devices & services → Add integration → **ATX LED**.
-7. Enter the hub host, for example `192.168.1.50`. Leave username and password blank unless the hub API requires them.
+7. Enter the hub IP address or hostname, for example `192.168.1.50`. Leave username and password blank unless the hub API requires them.
 
 Setup only uses read-only inventory requests.
 

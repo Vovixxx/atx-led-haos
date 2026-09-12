@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from .models import LightDevice, normalize_host, reconcile_lights
-from .protocol import dapc_frame, decode_send_raw_payload, query_status_level_max_min, SendRawResult
+from .protocol import dapc_frame, decode_send_raw_payload, SendRawResult
 
 DEFAULT_TIMEOUT = 10.0
 
@@ -119,9 +119,6 @@ class ATXLEDClient:
 
     async def async_set_level(self, channel: int, short_addr: int, level: int) -> SendRawResult:
         return await self.async_send_raw(channel, [dapc_frame(short_addr, level)])
-
-    async def async_query_light(self, channel: int, short_addr: int) -> SendRawResult:
-        return await self.async_send_raw(channel, query_status_level_max_min(short_addr))
 
     @property
     def websocket_devices_url(self) -> str:

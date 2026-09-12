@@ -3,7 +3,7 @@ import json
 from atx_led.models import apply_device_patches, parse_ws_patches, reconcile_lights
 
 
-def test_parse_ws_patches_reads_verified_hall_payload() -> None:
+def test_parse_ws_patches_reads_device_payload() -> None:
     payload = [
         {
             "addr": "0_s_1",
@@ -91,7 +91,7 @@ def test_unrelated_lights_are_unchanged(
     addresses_payload: dict, devices_payload: dict
 ) -> None:
     lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
-    glass_before = lights["0_s_11"]
+    cabinet_before = lights["0_s_11"]
     updated = apply_device_patches(lights, [("0_s_1", {"dev_on": True, "level": 86})])
     assert updated["0_s_1"].is_on is True
-    assert updated["0_s_11"] is glass_before
+    assert updated["0_s_11"] is cabinet_before

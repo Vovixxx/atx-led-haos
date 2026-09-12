@@ -46,10 +46,10 @@ def test_capabilities_come_from_flags_not_populated_color_fields(
     addresses_payload: dict, devices_payload: dict
 ) -> None:
     lights = reconcile_lights(addresses_payload, devices_payload)
-    glass = next(light for light in lights if light.device_id == "0_s_11")
+    cabinet = next(light for light in lights if light.device_id == "0_s_11")
     hall = next(light for light in lights if light.device_id == "0_s_1")
-    assert glass.has_color_temp is False
-    assert glass.color_temp_k == 2702
+    assert cabinet.has_color_temp is False
+    assert cabinet.color_temp_k == 2702
     assert hall.has_color_temp is True
 
 
@@ -85,12 +85,12 @@ def test_color_range_uses_user_mireds_not_cct_defaults() -> None:
     assert maximum == 5000
 
 
-def test_kitchen_stored_temp_outside_user_range_is_preserved(
+def test_stored_temp_outside_user_range_is_preserved(
     addresses_payload: dict, devices_payload: dict
 ) -> None:
     lights = reconcile_lights(addresses_payload, devices_payload)
-    kitchen = next(light for light in lights if light.device_id == "0_s_21")
-    assert kitchen.color_temp_k == 2702
-    minimum, maximum = color_temp_range_kelvin(kitchen.user_warm, kitchen.user_cool)
-    assert kitchen.color_temp_k < minimum
+    office = next(light for light in lights if light.device_id == "0_s_21")
+    assert office.color_temp_k == 2702
+    minimum, maximum = color_temp_range_kelvin(office.user_warm, office.user_cool)
+    assert office.color_temp_k < minimum
     assert maximum == 6494

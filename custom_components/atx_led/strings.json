@@ -10,7 +10,7 @@
           "password": "Password"
         },
         "data_description": {
-          "host": "IP address or hostname, for example 192.168.1.50",
+          "host": "IP address or hostname of the hub",
           "username": "Only needed if the hub API requires authentication",
           "password": "Only needed if the hub API requires authentication"
         }

@@ -2,7 +2,7 @@
 
 ## Agreed product behavior
 
-During setup, discover the hub's known DALI devices and automatically create entities according to the results. The user explicitly proposed this behavior after the inventory test.
+During setup, discover the hub's known DALI devices and automatically create entities according to the results.
 
 ## Setup flow
 
@@ -11,7 +11,7 @@ During setup, discover the hub's known DALI devices and automatically create ent
 3. Read `/dali/api/addresses` and `/dali/api/devices`; reconcile their IDs.
 4. Create the hub device and one light entity per eligible light record, keeping channel and short address as separate fields.
 5. Derive capabilities from device flags, not names or merely populated color fields.
-6. Read current state; optionally validate with paced individual DALI queries. No light state changes during setup.
+6. Read current state. No light state changes during setup.
 7. Show discovered-device count and actionable connection or response errors. Support rediscovery later without duplicating entities.
 
 This is discovery of already commissioned gear. Do not invoke physical commissioning, assign addresses, reset, or identify/blink devices as part of setup.
@@ -20,29 +20,27 @@ This is discovery of already commissioned gear. Do not invoke physical commissio
 
 - Dimmable, no color capability: brightness light.
 - `has_color_temp:true`: brightness + color-temperature light.
-- `has_color_rgb:true`: expose an RGB-capable light only after verifying the actual API color representation and commands. Current installation has no advertised RGB lights.
+- `has_color_rgb:true`: expose an RGB-capable light only after verifying the actual API color representation and commands. Do not assume RGB from populated color fields.
 - Explicit relay-only devices: on/off entity behavior after verifying semantics.
 - Buttons, IO and passive devices: do not misclassify as ordinary lights; defer dedicated entity platforms.
 - Groups and virtual groups: separate later feature; do not turn them into individual fixture records or broadcast targets.
 
-Use a stable verified hub identifier plus internal channel and short address for unique IDs. Do not use the light name or `serial_nb` alone: serial values repeat in this inventory. Until hub identity is verified, document the fallback identity strategy and behavior if the IP changes.
+Unique IDs are `{hub_id}_{channel}_{short_addr}`. Hub identity currently falls back to the host address. Do not use the light name or `serial_nb` alone: serial values can repeat. Reconfigure updates the host without creating new unique IDs.
 
-Use the stored device name as the initial display name. User renames in HA should persist. Hue discovery visibility (`hue_hidden`) must not prevent native integration discovery.
+Use the stored device name as the initial display name. User renames in Home Assistant should persist. Hue discovery visibility (`hue_hidden`) must not prevent native integration discovery.
 
 ## Brightness and state
 
-Base on/off on reliable state/readback; raw level > 0 in the hub cache is not enough. Preserve last requested brightness separately if useful. Failed reads mean unknown/unavailable, not off.
+Base on/off on `dev_on`, not raw `level > 0`. Preserve last stored brightness when off. Failed reads mean unknown/unavailable, not off.
 
-Do not finalize percent conversion until the main UI mapping is verified. Handle zero, minimum, maximum, rounding, and invalid/equal min/max values explicitly. The first release should match the user's intended hub-control percentage consistently.
+Brightness uses the locked hub UI mapping `(raw - min) / (max - min)`. Handle zero, minimum, maximum, rounding, and invalid/equal min/max values explicitly.
 
 ## Color temperature
 
-Expose only when supported. Verify which fields represent the valid range before converting them. `phy_warm`, `phy_cool`, `user_warm`, and `user_cool` resemble reciprocal-megakelvin values; do not interchange them with kelvin or use arbitrary `color_cct_*` defaults.
+Expose only when `has_color_temp` is true. The valid Kelvin range comes from `user_warm` / `user_cool` as mireds. Control uses `POST /dali/api/devices/{id}` with `color_temp_k`. Do not interchange physical/user mireds with kelvin or use arbitrary `color_cct_*` defaults.
 
-Some hub records contain values outside their listed user/physical range (for example Office Light stores 2702 K with a 3003 K lower bound). Preserve source data, report inconsistencies, and validate ranges before enabling control. Do not silently change device configuration to repair them.
+A stored `color_temp_k` can sit outside the listed user/physical range. Preserve source data and clamp control to the valid range. Do not silently change device configuration to repair the stored value.
 
 ## Updates and reliability
 
 The coordinator listens on `/ws/dali/devices` for immediate state. HTTP polling every 15 seconds remains the backup. Reconnect without replaying old light-changing requests. Serialize DALI traffic and avoid overlapping scans. Enable additional entities without controlling them.
-
-The development test harness remains restricted to channel 1/address 1 for light-changing tests. Production scope expansion and live tests on other lights require the user's explicit authorization.

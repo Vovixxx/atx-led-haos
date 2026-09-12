@@ -4,21 +4,20 @@ The integration maps Home Assistant brightness to DALI using the hub UI scale, n
 
 `(raw - min_level) / (max_level - min_level)`
 
-Locked after the address-1 185 → 68% observation and user confirmation in Home Assistant. 0 is off. 255 is MASK and is never sent.
+Locked after verifying a fixture at raw 185 with min 50 and max 250 displayed as **68%** in the hub UI. 0 is off. 255 is MASK and is never sent.
 
 ## Earlier test history
 
-1. Browser UI test: set Hall Light (channel 1/address 1) percentage field to 10. A page reload showed on and 10%. This used the hub UI, not a Home Assistant integration.
-2. User requested API control instead and restricted light-changing tests to address 1 with approval.
-3. Approved raw API test: POST `{"channel":0,"commands":["h02B9"]}`. Hub returned HTTP 200 and `{"ok":true,"responses":["N"]}`. Raw level was 185. User reported the UI showed **68%**, then manually turned the light off.
-4. Read-only address inventory GET succeeded.
-5. Read-only address-1 status/actual/max/min queries returned `J00,J00,JFA,J32`.
-6. Full read-only inspection: all 39 known light addresses responded to status/actual/max/min queries. All actual levels were 0. Raw results and per-address timestamps are saved in `../dali-light-query.json`.
-7. Home Assistant custom integration confirmed the min/max linear mapping against the hub UI.
+1. Setting a hub UI percentage field to 10 showed on and 10% after reload. That used the hub UI, not this integration.
+2. Approved raw API test: POST `{"channel":0,"commands":["h02B9"]}`. Hub returned HTTP 200 and `{"ok":true,"responses":["N"]}`. Raw level was 185. The hub UI showed **68%**.
+3. Read-only address inventory GET succeeded.
+4. Read-only status/actual/max/min for short address 1 returned `J00,J00,JFA,J32`.
+5. Read-only queries of other known light addresses also succeeded. A stored `level` of 0 does not by itself mean the fixture is missing.
+6. Home Assistant confirmed the min/max linear mapping against the hub UI.
 
 ## Correction to the original brightness assumption
 
-The command at raw level 185 was calculated for approximately 15% physical output under the standard DALI logarithmic curve. It did not match the user's intended **hub UI percentage**. These two meanings of percentage must not be conflated.
+The command at raw level 185 was calculated for approximately 15% physical output under the standard DALI logarithmic curve. It did not match the **hub UI percentage**. These two meanings of percentage must not be conflated.
 
 Raw DALI maximum arc level is 254. Value 255 is special (MASK/stop-fade semantics), not normal full brightness. Home Assistant's own 0–255 brightness representation must be translated rather than copied blindly to raw DALI.
 
@@ -49,8 +48,8 @@ This is **not** the hub percentage-slider conversion used by this integration.
 
 ## State freshness and colors
 
-Hub record for Hall Light retained `level:185` while `dev_on:false`; direct actual level was 0. Treat stored brightness as potentially a last requested/remembered level.
+A hub record can retain a last `level` while `dev_on` is false; a direct actual-level query can return 0. Treat stored brightness as last requested/remembered, not proof the lamp is emitting.
 
-Color temperature control uses stored hub Kelvin values and the hub device endpoint. User confirmed this looks correct in Home Assistant. DT8 register-level queries remain unused.
+Color temperature control uses stored hub Kelvin values and `POST /dali/api/devices/{id}` with `color_temp_k`. DT8 register-level queries remain unused.
 
-Eight non-color devices returned `03`: Cabinet Light, Hallway Light, Mirror Light, Cove Light, Arch Light, Atrium Light, Peninsula Light, Ceiling Strip. The flags warrant diagnosis later; do not label them unreachable, because each replied.
+Fixtures may report DALI status `03` (driver/lamp-failure bits) and still reply. Do not label those unreachable from the status byte alone.

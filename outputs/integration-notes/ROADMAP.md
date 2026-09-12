@@ -1,37 +1,20 @@
 # Integration roadmap
 
-## 1. Protocol foundation — partially complete
+Shipped in **0.2.0** as a HACS custom repository: https://github.com/Vovixxx/atx-led-haos
 
-Completed: raw control accepted and visually confirmed (percentage mismatch); inventory endpoints verified; direct state/level/min/max queries verified on all 39 known lights; hub color-capability snapshot saved.
+## Done
 
-Remaining: hub identity and authentication variants. Brightness UI mapping is locked. WebSocket push is verified.
+1. **Protocol** — verified HTTP inventory, `send-raw` DAPC, brightness mapping locked to hub UI `(level - min) / (max - min)`, color temperature via the hub device endpoint, `/ws/dali/devices` push verified.
+2. **Client** — async discovery, encoding/decoding, serialized control, error handling, mock tests.
+3. **Home Assistant first release** — config flow, hub device, automatic light entities, on/off, brightness, Kelvin for supported fixtures.
+4. **State sync** — live WebSocket patches plus 15-second HTTP poll backup. Reconnect does not replay controls. `iot_class` is `local_push`.
+5. **Packaging (manual)** — HACS custom-repo layout, brand icons, install docs, redacted diagnostics.
 
-Acceptance: known raw command and displayed percentage agree; readback clearly distinguishes stored versus actual state. Live control tests require approval.
+## Later
 
-## 2. Async API client — implemented (offline)
-
-HTTP discovery, normalized device data, individual control encoding, error decoding and serialized send-raw requests live in `custom_components/atx_led`. Mock-based pytest coverage is in `tests/`. Live hub identity and authentication variants remain later work.
-
-Acceptance: mock-based tests pass without operating lights; partial device failures do not discard the entire inventory.
-
-## 3. Home Assistant first release — code complete, not installed
-
-Manifest, config flow, hub device registration, automatic light entities, coordinator polling, on/off and brightness are in `custom_components/atx_led`. Color-temperature writes use the hub device endpoint and were confirmed in Home Assistant. Validate against the user's exact installed HA version, which is not yet recorded.
-
-Acceptance: HA OS loads the custom integration, setup creates eligible entities without controlling lights, and approved address-1 tests work.
-
-## 4. State synchronization — implemented
-
-The coordinator listens on `/ws/dali/devices`, merges partial `{addr, data}` patches into known lights, and reconnects without replaying controls. HTTP inventory polling every 15 seconds remains the backup and the path for newly discovered fixtures.
-
-Acceptance: HA reflects external changes and recovery causes no unintended controls.
-
-## 5. Color and expanded features
-
-Add verified color temperature for supported fixtures. Later add groups, scenes and transitions, with separately approved live testing. RGB remains deferred until supported hardware and API behavior can be tested.
-
-## 6. Packaging
-
-Provide an installable custom component, release notes, HA OS installation/removal instructions, redacted diagnostics and compatibility tests. HACS distribution is optional later work.
-
-First-release integration code is in `custom_components/atx_led`. It has not been installed on Home Assistant OS yet. This folder remains the factual discovery record.
+- Groups, scenes, and transitions.
+- RGB, if a hub advertises supported fixtures.
+- Buttons, IO, and relay platforms.
+- Diagnose DALI status flags when fixtures report driver or lamp-failure bits.
+- Stable hub identity that is not the IP address.
+- Default HACS store listing.
