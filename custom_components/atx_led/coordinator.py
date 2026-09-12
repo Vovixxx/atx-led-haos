@@ -17,6 +17,7 @@ from .models import (
     GroupDevice,
     LightDevice,
     SceneDevice,
+    apply_derived_group_states,
     apply_device_patches,
     apply_group_patches,
     hub_unique_id,
@@ -168,6 +169,7 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             return
         if kind == "groups":
             groups = apply_group_patches(self.data.groups, patches)
+            groups = apply_derived_group_states(groups, self.data.lights)
             if groups is self.data.groups:
                 return
             self.async_set_updated_data(
@@ -177,10 +179,11 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             )
             return
         lights = apply_device_patches(self.data.lights, patches)
-        if lights is self.data.lights:
+        groups = apply_derived_group_states(self.data.groups, lights)
+        if lights is self.data.lights and groups is self.data.groups:
             return
         self.async_set_updated_data(
-            ATXLEDData(lights=lights, groups=self.data.groups, scenes=self.data.scenes)
+            ATXLEDData(lights=lights, groups=groups, scenes=self.data.scenes)
         )
 
     async def _async_update_data(self) -> ATXLEDData:
@@ -188,10 +191,13 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             lights, groups, scenes = await self.client.async_discover_inventory()
         except ATXLEDError as err:
             raise UpdateFailed(str(err)) from err
+        lights_map = {light.device_id: light for light in lights}
         discovered_groups = {group.device_id: group for group in groups}
         previous_groups = self.data.groups if self.data is not None else {}
+        groups_map = preserve_group_live_state(previous_groups, discovered_groups)
+        groups_map = apply_derived_group_states(groups_map, lights_map)
         return ATXLEDData(
-            lights={light.device_id: light for light in lights},
-            groups=preserve_group_live_state(previous_groups, discovered_groups),
+            lights=lights_map,
+            groups=groups_map,
             scenes={scene.scene_id: scene for scene in scenes},
         )

@@ -24,6 +24,7 @@ from .const import (
     ATTR_DALI_GROUP_ADDRESS,
     ATTR_DALI_GROUP_KIND,
     ATTR_DALI_MEMBERS,
+    ATTR_DALI_STATE_SOURCE,
     ATTR_DALI_SHORT_ADDRESS,
     ATTR_DALI_STATUS,
 )
@@ -222,6 +223,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 unique_id=self._attr_unique_id,
                 name=group.name if group else device_id,
                 hub_device_id=coordinator.hub_device_id,
+                model="DALI Group" if not group or group.is_dali_group else "Virtual Group",
             )
         )
         self._apply_capabilities(group)
@@ -277,6 +279,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
             ATTR_DALI_GROUP_ADDRESS: group.group_addr,
             ATTR_DALI_GROUP_KIND: group.kind,
             ATTR_DALI_MEMBERS: list(group.members),
+            ATTR_DALI_STATE_SOURCE: group.state_source,
         }
 
     async def _async_set_level(self, group: GroupDevice, level: int) -> None:

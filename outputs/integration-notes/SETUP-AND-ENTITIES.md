@@ -23,7 +23,7 @@ This is discovery of already commissioned gear. Do not invoke physical commissio
 - `has_color_rgb:true`: expose an RGB-capable light only after verifying the actual API color representation and commands. Do not assume RGB from populated color fields.
 - Explicit relay-only devices: on/off entity behavior after verifying semantics.
 - Buttons, IO and passive devices: do not misclassify as ordinary lights; defer dedicated entity platforms.
-- Groups and virtual groups: separate light entities (`{hub_id}_g_{channel}_{group}` / `{hub_id}_v_{channel}_{group}`). Do not turn them into individual fixture records or import the broadcast `all` target.
+- Groups and virtual groups: separate light entities (`{hub_id}_g_{channel}_{group}` / `{hub_id}_v_{channel}_{group}`). Do not turn them into individual fixture records or import the broadcast `all` target. If the hub has no group `dev_on`/`level`, derive on/off and brightness from member fixtures so the entity is not left unknown.
 - Hub scenes: scene entities when a DALI scene number is present. Recall uses group or per-fixture GO TO SCENE, not broadcast.
 
 Unique IDs for fixtures are `{hub_id}_{channel}_{short_addr}`. Hub identity currently falls back to the host address. Do not use the light name or `serial_nb` alone: serial values can repeat. Reconfigure updates the host without creating new unique IDs.

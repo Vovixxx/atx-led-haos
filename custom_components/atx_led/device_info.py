@@ -8,7 +8,11 @@ from .const import DOMAIN, MANUFACTURER
 
 
 def light_device_registry_info(
-    *, unique_id: str, name: str, hub_device_id: str | None = None
+    *,
+    unique_id: str,
+    name: str,
+    hub_device_id: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Describe a fixture or group device linked to the hub by registry id.
 
@@ -20,6 +24,8 @@ def light_device_registry_info(
         "name": name,
         "manufacturer": MANUFACTURER,
     }
+    if model:
+        info["model"] = model
     if hub_device_id:
         info["via_device_id"] = hub_device_id
     return info

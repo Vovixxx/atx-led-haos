@@ -11,6 +11,7 @@ from .models import (
     LightDevice,
     SceneDevice,
     normalize_host,
+    merge_group_records,
     parse_scenes,
     reconcile_groups,
     reconcile_lights,
@@ -125,6 +126,14 @@ class ATXLEDClient:
         except ATXLEDError:
             return []
 
+    async def async_get_groups(self) -> object:
+        """Read hub group records. Missing or unusable payloads become an empty object."""
+        try:
+            payload = await self._request("get", "/dali/api/groups")
+        except ATXLEDError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     async def async_discover_lights(self) -> list[LightDevice]:
         addresses = await self.async_get_addresses()
         devices = await self.async_get_devices()
@@ -136,6 +145,7 @@ class ATXLEDClient:
         """Read lights, groups, and scenes. Scene GET failures do not fail inventory."""
         addresses = await self.async_get_addresses()
         devices = await self.async_get_devices()
+        devices = merge_group_records(devices, await self.async_get_groups())
         lights = reconcile_lights(addresses, devices)
         groups = reconcile_groups(addresses, devices, lights)
         scenes_payload = await self.async_get_scenes()

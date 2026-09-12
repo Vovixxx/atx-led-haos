@@ -101,6 +101,8 @@ GET `/dali/api/scenes` is now requested during inventory. A missing or unusable 
 
 Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead.
 
+Group records are often missing from `/dali/api/devices`, and `/ws/dali/groups` may not send a snapshot on connect. In that case the group name still comes from `/dali/api/addresses`, members are inferred from each fixture `groups` field (bitmask, group-number list, 16-flag array, or `0_g_N` ids), and on/level are derived from those members until the hub sends a group patch. GET `/dali/api/groups` is requested best-effort and must not fail inventory.
+
 Do not present remaining untested source-observed endpoints as integration controls.
 
 ## Serial documentation versus HTTP

@@ -74,6 +74,7 @@ async def test_discover_inventory_includes_groups_and_best_effort_scenes(
         {
             ("GET", "http://192.168.1.50/dali/api/addresses"): FakeResponse(200, addresses_payload),
             ("GET", "http://192.168.1.50/dali/api/devices"): FakeResponse(200, devices_payload),
+            ("GET", "http://192.168.1.50/dali/api/groups"): FakeResponse(404, {"error": "missing"}),
             ("GET", "http://192.168.1.50/dali/api/scenes"): FakeResponse(200, scenes_payload),
         }
     )
@@ -91,6 +92,7 @@ async def test_missing_scenes_endpoint_does_not_fail_inventory(
         {
             ("GET", "http://192.168.1.50/dali/api/addresses"): FakeResponse(200, addresses_payload),
             ("GET", "http://192.168.1.50/dali/api/devices"): FakeResponse(200, devices_payload),
+            ("GET", "http://192.168.1.50/dali/api/groups"): FakeResponse(404, {"error": "missing"}),
             ("GET", "http://192.168.1.50/dali/api/scenes"): FakeResponse(404, {"error": "missing"}),
         }
     )
