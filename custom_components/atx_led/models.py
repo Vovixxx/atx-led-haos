@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
+import re
 from urllib.parse import urlparse
+
+from .protocol import GROUP_ADDR_MAX, SCENE_MAX, SHORT_ADDR_MAX
 
 
 @dataclass(frozen=True)
@@ -28,11 +31,65 @@ class LightDevice:
     is_io_device: bool
     is_passive: bool
     is_relay_device: bool
+    group_membership: tuple[int, ...] = ()
     available: bool = True
 
     @property
     def unique_suffix(self) -> str:
         return f"{self.channel}_{self.short_addr}"
+
+
+GROUP_KIND_DALI = "dali"
+GROUP_KIND_VIRTUAL = "virtual"
+
+_ADDR_ID_RE = re.compile(r"^(\d+)_([sgv])_(\d+)$")
+_SCENE_ID_RE = re.compile(r"^(\d+)_(?:sc|scene|n)_(\d+)$")
+
+
+@dataclass(frozen=True)
+class GroupDevice:
+    """A commissioned DALI group or hub virtual group."""
+
+    device_id: str
+    channel: int
+    group_addr: int
+    kind: str
+    name: str
+    is_on: bool | None
+    stored_level: int | None
+    min_level: int
+    max_level: int
+    has_color_temp: bool
+    color_temp_k: int | None
+    user_warm: int | None
+    user_cool: int | None
+    members: tuple[str, ...]
+    available: bool = True
+
+    @property
+    def unique_suffix(self) -> str:
+        prefix = "g" if self.kind == GROUP_KIND_DALI else "v"
+        return f"{prefix}_{self.channel}_{self.group_addr}"
+
+    @property
+    def is_dali_group(self) -> bool:
+        return self.kind == GROUP_KIND_DALI
+
+
+@dataclass(frozen=True)
+class SceneDevice:
+    """A named hub scene that can recall DALI scene levels."""
+
+    scene_id: str
+    name: str
+    channel: int | None
+    dali_scene: int | None
+    group_addr: int | None
+    members: tuple[str, ...]
+
+    @property
+    def unique_suffix(self) -> str:
+        return f"scene_{self.scene_id}"
 
 
 def normalize_host(host: str) -> str:
@@ -101,7 +158,299 @@ def parse_device(device_id: str, raw: dict) -> LightDevice | None:
         is_io_device=_as_bool(raw.get("is_io_device")),
         is_passive=_as_bool(raw.get("is_passive")),
         is_relay_device=_as_bool(raw.get("is_relay_device")),
+        group_membership=_parse_group_membership(raw.get("groups")),
     )
+
+
+def parse_addr_id(device_id: str) -> tuple[int, str, int] | None:
+    """Parse hub IDs such as ``0_s_1``, ``0_g_1``, and ``0_v_0``."""
+    match = _ADDR_ID_RE.match(str(device_id).strip())
+    if match is None:
+        return None
+    return (int(match.group(1)), match.group(2), int(match.group(3)))
+
+
+def _parse_group_membership(value: object) -> tuple[int, ...]:
+    if isinstance(value, list):
+        groups: list[int] = []
+        for item in value:
+            parsed = _as_optional_int(item)
+            if parsed is None or parsed < 0 or parsed > GROUP_ADDR_MAX:
+                continue
+            if parsed not in groups:
+                groups.append(parsed)
+        return tuple(groups)
+    bitmask = _as_optional_int(value)
+    if bitmask is None or bitmask <= 0:
+        return ()
+    return tuple(index for index in range(GROUP_ADDR_MAX + 1) if bitmask & (1 << index))
+
+
+def _address_keys(addresses: dict, category: str) -> list[tuple[str, str]]:
+    items = addresses.get(category) or [] if isinstance(addresses, dict) else []
+    result: list[tuple[str, str]] = []
+    for item in items:
+        if isinstance(item, dict) and item.get("key"):
+            key = str(item["key"])
+            name = str(item.get("value") or key).strip() or key
+            result.append((key, name))
+        elif isinstance(item, str) and item:
+            result.append((item, item))
+    return result
+
+
+def _member_ids(value: object) -> tuple[str, ...]:
+    if isinstance(value, list):
+        members: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item and item not in members:
+                members.append(item)
+            elif isinstance(item, dict) and item.get("key"):
+                key = str(item["key"])
+                if key and key not in members:
+                    members.append(key)
+        return tuple(members)
+    if isinstance(value, str) and value:
+        return (value,)
+    return ()
+
+
+def parse_group(
+    device_id: str,
+    raw: dict | None,
+    *,
+    name_fallback: str,
+    kind: str,
+) -> GroupDevice | None:
+    parsed = parse_addr_id(device_id)
+    channel = 0
+    group_addr: int | None = None
+    if parsed is not None:
+        channel, marker, group_addr = parsed
+        if marker == "g":
+            kind = GROUP_KIND_DALI
+        elif marker == "v":
+            kind = GROUP_KIND_VIRTUAL
+        elif marker == "s":
+            return None
+    if isinstance(raw, dict):
+        channel = _as_int(raw.get("channel"), channel)
+        address = raw.get("address")
+        if isinstance(address, list) and len(address) >= 3:
+            group_addr = _as_optional_int(address[2]) if group_addr is None else group_addr
+        if group_addr is None:
+            group_addr = _as_optional_int(raw.get("short_addr") or raw.get("group_addr"))
+        name = str(raw.get("dev_name") or name_fallback or device_id).strip()
+        is_on_raw = raw.get("dev_on")
+        is_on = None if is_on_raw is None else bool(is_on_raw)
+        members = (
+            _member_ids(raw.get("members"))
+            or _member_ids(raw.get("lights"))
+            or _member_ids(raw.get("devices"))
+        )
+        return GroupDevice(
+            device_id=device_id,
+            channel=channel,
+            group_addr=group_addr if group_addr is not None else 0,
+            kind=kind,
+            name=name,
+            is_on=is_on,
+            stored_level=_as_optional_int(raw.get("level")),
+            min_level=_as_int(raw.get("min_level"), 1),
+            max_level=_as_int(raw.get("max_level"), 254),
+            has_color_temp=_as_bool(raw.get("has_color_temp")),
+            color_temp_k=_as_optional_int(raw.get("color_temp_k")),
+            user_warm=_as_optional_int(raw.get("user_warm")),
+            user_cool=_as_optional_int(raw.get("user_cool")),
+            members=members,
+        )
+    if group_addr is None:
+        return None
+    return GroupDevice(
+        device_id=device_id,
+        channel=channel,
+        group_addr=group_addr,
+        kind=kind,
+        name=str(name_fallback or device_id).strip(),
+        is_on=None,
+        stored_level=None,
+        min_level=1,
+        max_level=254,
+        has_color_temp=False,
+        color_temp_k=None,
+        user_warm=None,
+        user_cool=None,
+        members=(),
+    )
+
+
+def _infer_group_members(
+    groups: list[GroupDevice], lights: list[LightDevice]
+) -> list[GroupDevice]:
+    """Fill empty DALI group member lists from fixture group membership."""
+    if not groups:
+        return groups
+    by_group: dict[tuple[int, int], list[str]] = {}
+    for light in lights:
+        for group_addr in light.group_membership:
+            by_group.setdefault((light.channel, group_addr), []).append(light.device_id)
+    updated: list[GroupDevice] = []
+    changed = False
+    for group in groups:
+        if group.members or not group.is_dali_group:
+            updated.append(group)
+            continue
+        inferred = tuple(by_group.get((group.channel, group.group_addr), ()))
+        if inferred:
+            updated.append(replace(group, members=inferred))
+            changed = True
+        else:
+            updated.append(group)
+    return updated if changed else groups
+
+
+def reconcile_groups(
+    addresses: dict, devices: dict, lights: list[LightDevice] | None = None
+) -> list[GroupDevice]:
+    """Join known group addresses with device records. Skip broadcast ``all``."""
+    if not isinstance(devices, dict):
+        devices = {}
+    result: list[GroupDevice] = []
+    seen: set[str] = set()
+    for category, kind in (
+        ("Groups", GROUP_KIND_DALI),
+        ("Virtual Groups", GROUP_KIND_VIRTUAL),
+    ):
+        for device_id, name in _address_keys(addresses if isinstance(addresses, dict) else {}, category):
+            if device_id in seen or device_id == "all":
+                continue
+            raw = devices.get(device_id)
+            group = parse_group(
+                device_id,
+                raw if isinstance(raw, dict) else None,
+                name_fallback=name,
+                kind=kind,
+            )
+            if group is None:
+                continue
+            seen.add(device_id)
+            result.append(group)
+    if lights:
+        result = _infer_group_members(result, lights)
+    return result
+
+
+def _parse_scene_id(scene_id: str) -> tuple[int | None, int | None]:
+    match = _SCENE_ID_RE.match(str(scene_id).strip())
+    if match is not None:
+        return (int(match.group(1)), int(match.group(2)))
+    trailing = re.search(r"(\d+)$", str(scene_id).strip())
+    if trailing is None:
+        return (None, None)
+    scene = int(trailing.group(1))
+    return (None, scene if 0 <= scene <= SCENE_MAX else None)
+
+
+def parse_scene(scene_id: str, raw: dict | None, name_fallback: str | None = None) -> SceneDevice | None:
+    """Normalize one hub scene record. Missing DALI numbers are kept as None."""
+    channel, dali_scene = _parse_scene_id(scene_id)
+    group_addr: int | None = None
+    members: tuple[str, ...] = ()
+    name = str(name_fallback or scene_id).strip() or scene_id
+    if isinstance(raw, dict):
+        name = str(raw.get("dev_name") or raw.get("name") or raw.get("value") or name).strip()
+        channel = _as_optional_int(raw.get("channel")) if raw.get("channel") is not None else channel
+        for key in ("scene", "scene_number", "dali_scene", "number"):
+            if key in raw:
+                parsed_scene = _as_optional_int(raw.get(key))
+                if parsed_scene is not None:
+                    dali_scene = parsed_scene
+                    break
+        for key in ("group", "group_addr", "short_addr"):
+            if key in raw:
+                parsed_group = _as_optional_int(raw.get(key))
+                if parsed_group is not None:
+                    group_addr = parsed_group
+                    break
+        members = (
+            _member_ids(raw.get("members"))
+            or _member_ids(raw.get("lights"))
+            or _member_ids(raw.get("devices"))
+        )
+    if dali_scene is not None and not 0 <= dali_scene <= SCENE_MAX:
+        dali_scene = None
+    if group_addr is not None and not 0 <= group_addr <= GROUP_ADDR_MAX:
+        group_addr = None
+    return SceneDevice(
+        scene_id=str(scene_id),
+        name=name,
+        channel=channel,
+        dali_scene=dali_scene,
+        group_addr=group_addr,
+        members=members,
+    )
+
+
+def parse_scenes(payload: object) -> list[SceneDevice]:
+    """Decode GET /dali/api/scenes in the shapes observed from hub-style APIs."""
+    if isinstance(payload, (bytes, bytearray)):
+        payload = payload.decode()
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+    items: list[tuple[str, dict | None, str | None]] = []
+    if isinstance(payload, dict):
+        nested = payload.get("Scenes") or payload.get("scenes")
+        if isinstance(nested, list):
+            payload = nested
+        elif all(isinstance(value, dict) for value in payload.values()):
+            for scene_id, raw in payload.items():
+                if str(scene_id) in {"Scenes", "scenes"}:
+                    continue
+                items.append((str(scene_id), raw if isinstance(raw, dict) else None, None))
+        else:
+            return []
+    if isinstance(payload, list):
+        for index, item in enumerate(payload):
+            if isinstance(item, dict) and item.get("key"):
+                items.append((str(item["key"]), item, str(item.get("value") or item["key"])))
+            elif isinstance(item, dict) and item.get("id"):
+                items.append((str(item["id"]), item, str(item.get("name") or item["id"])))
+            elif isinstance(item, str) and item:
+                items.append((item, None, item))
+            elif isinstance(item, dict):
+                items.append((str(item.get("dev_name") or index), item, None))
+    scenes: list[SceneDevice] = []
+    seen: set[str] = set()
+    for scene_id, raw, name_fallback in items:
+        if scene_id in seen:
+            continue
+        scene = parse_scene(scene_id, raw, name_fallback)
+        if scene is None:
+            continue
+        seen.add(scene_id)
+        scenes.append(scene)
+    return scenes
+
+
+def scene_short_addrs(members: tuple[str, ...], lights: dict[str, LightDevice]) -> list[int]:
+    """Resolve scene members to DALI short addresses, skipping ineligible IDs."""
+    addrs: list[int] = []
+    for member_id in members:
+        light = lights.get(member_id)
+        if light is not None:
+            if 0 <= light.short_addr <= SHORT_ADDR_MAX and light.short_addr not in addrs:
+                addrs.append(light.short_addr)
+            continue
+        parsed = parse_addr_id(member_id)
+        if parsed is None or parsed[1] != "s":
+            continue
+        short_addr = parsed[2]
+        if 0 <= short_addr <= SHORT_ADDR_MAX and short_addr not in addrs:
+            addrs.append(short_addr)
+    return addrs
 
 
 def _is_eligible_light(device: LightDevice) -> bool:
@@ -215,4 +564,46 @@ def apply_device_patches(
             updated[addr] = merged
             changed = True
     return updated if changed else lights
+
+
+def apply_group_patch(group: GroupDevice, data: dict) -> GroupDevice:
+    """Merge a partial `/ws/dali/groups` patch without dropping members or limits."""
+    updates: dict[str, object] = {}
+    if "dev_on" in data:
+        updates["is_on"] = bool(data["dev_on"])
+    if "level" in data:
+        updates["stored_level"] = _as_optional_int(data["level"])
+    if "dev_name" in data and data["dev_name"] not in (None, ""):
+        updates["name"] = str(data["dev_name"]).strip()
+    if "color_temp_k" in data:
+        updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
+    members = (
+        _member_ids(data.get("members"))
+        or _member_ids(data.get("lights"))
+        or _member_ids(data.get("devices"))
+    )
+    if members:
+        updates["members"] = members
+    if not updates:
+        return group
+    return replace(group, **updates)
+
+
+def apply_group_patches(
+    groups: dict[str, GroupDevice], patches: list[tuple[str, dict]]
+) -> dict[str, GroupDevice]:
+    """Apply patches to known groups only. Unknown addrs are ignored."""
+    if not patches:
+        return groups
+    updated = dict(groups)
+    changed = False
+    for addr, data in patches:
+        current = updated.get(addr)
+        if current is None:
+            continue
+        merged = apply_group_patch(current, data)
+        if merged is not current:
+            updated[addr] = merged
+            changed = True
+    return updated if changed else groups
 

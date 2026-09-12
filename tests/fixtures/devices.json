@@ -22,6 +22,7 @@
     "min_level": 50,
     "serial_nb": 2,
     "short_addr": 1,
+    "groups": [1],
     "user_cool": 200,
     "user_warm": 370
   },
@@ -120,5 +121,16 @@
     "max_level": 254,
     "min_level": 1,
     "short_addr": 50
+  },
+  "0_g_1": {
+    "address": [0, "group", 1],
+    "channel": 0,
+    "dev_name": "Group 1",
+    "dev_on": true,
+    "has_color_temp": false,
+    "level": 128,
+    "max_level": 254,
+    "min_level": 1,
+    "members": ["0_s_1", "0_s_11"]
   }
 }

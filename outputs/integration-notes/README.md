@@ -1,6 +1,6 @@
 # ATX LED integration notes
 
-Updated 2026-09-12. Custom integration: `custom_components/atx_led` (0.2.0, HACS custom repository).
+Updated 2026-09-12. Custom integration: `custom_components/atx_led` (0.3.0, HACS custom repository).
 
 ## Start here
 
@@ -13,4 +13,4 @@ Updated 2026-09-12. Custom integration: `custom_components/atx_led` (0.2.0, HACS
 
 ## Shipped behavior
 
-Setup discovers already commissioned DALI fixtures and creates one light entity per eligible record. It does not commission, randomize, or readdress the network. On/off and brightness use `send-raw`. Color temperature uses the hub device endpoint. State is pushed on `/ws/dali/devices` with HTTP polling as backup.
+Setup discovers already commissioned DALI fixtures, groups, and hub scenes. It creates one light entity per eligible fixture and group, and one scene entity per named scene. It does not commission, randomize, or readdress the network. Fixture and DALI-group on/off use `send-raw`. Color temperature and dim-while-on use the hub device endpoint. State is pushed on `/ws/dali/devices` and `/ws/dali/groups` with HTTP polling as backup.

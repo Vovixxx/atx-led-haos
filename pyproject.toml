@@ -1,6 +1,6 @@
 [project]
 name = "atx-led-ha"
-version = "0.2.0"
+version = "0.3.0"
 description = "Home Assistant custom integration for a local ATX LED DALI hub"
 requires-python = ">=3.12"
 readme = "README.md"
