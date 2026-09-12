@@ -99,11 +99,11 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
 
     async def async_activate(self, **kwargs: Any) -> None:
         scene = self._scene
-        if scene is None:
+        if scene is None or scene.dali_scene is None:
             raise HomeAssistantError("Scene is unavailable")
         lights = self.coordinator.data.lights if self.coordinator.data else {}
         try:
             await self.coordinator.client.async_recall_scene(scene, lights)
-        except ATXLEDError as err:
+        except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

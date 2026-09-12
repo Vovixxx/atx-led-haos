@@ -21,6 +21,7 @@ from .models import (
     apply_group_patches,
     hub_unique_id,
     parse_ws_patches,
+    preserve_group_live_state,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -187,8 +188,10 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             lights, groups, scenes = await self.client.async_discover_inventory()
         except ATXLEDError as err:
             raise UpdateFailed(str(err)) from err
+        discovered_groups = {group.device_id: group for group in groups}
+        previous_groups = self.data.groups if self.data is not None else {}
         return ATXLEDData(
             lights={light.device_id: light for light in lights},
-            groups={group.device_id: group for group in groups},
+            groups=preserve_group_live_state(previous_groups, discovered_groups),
             scenes={scene.scene_id: scene for scene in scenes},
         )

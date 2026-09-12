@@ -2,6 +2,7 @@ from atx_led.models import (
     apply_group_patches,
     parse_addr_id,
     parse_device,
+    preserve_group_live_state,
     reconcile_groups,
     reconcile_lights,
 )
@@ -113,3 +114,27 @@ def test_group_patches_do_not_create_unknown_groups(
     )
     assert set(updated) == set(groups)
     assert "0_g_9" not in updated
+
+
+def test_http_poll_keeps_websocket_group_state_when_inventory_omits_it(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, lights)
+    }
+    live = apply_group_patches(
+        groups, [("0_g_1", {"dev_on": False, "level": 46}), ("0_v_0", {"dev_on": True, "level": 80})]
+    )
+    address_only = dict(devices_payload)
+    address_only.pop("0_g_1")
+    rediscovered = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, address_only, lights)
+    }
+    merged = preserve_group_live_state(live, rediscovered)
+    assert merged["0_g_1"].is_on is False
+    assert merged["0_g_1"].stored_level == 46
+    assert merged["0_v_0"].is_on is True
+    assert merged["0_v_0"].stored_level == 80

@@ -29,6 +29,26 @@ def test_parse_scenes_ignores_malformed_payloads() -> None:
     assert parse_scenes({"ok": True}) == []
 
 
+def test_parse_scenes_nested_object_and_ok_wrapper() -> None:
+    nested = parse_scenes(
+        {"scenes": {"0_sc_0": {"dev_name": "Evening", "scene": 0, "channel": 0}}}
+    )
+    assert [scene.scene_id for scene in nested] == ["0_sc_0"]
+    wrapped = parse_scenes(
+        {"ok": True, "scenes": [{"key": "0_sc_3", "value": "Read", "scene": 3}]}
+    )
+    assert wrapped[0].dali_scene == 3
+    assert wrapped[0].name == "Read"
+
+
+def test_scene_short_addr_is_not_treated_as_group() -> None:
+    scenes = parse_scenes(
+        {"0_sc_0": {"dev_name": "Evening", "scene": 0, "short_addr": 1, "channel": 0}}
+    )
+    assert scenes[0].group_addr is None
+    assert scenes[0].dali_scene == 0
+
+
 def test_scene_short_addrs_skip_groups_and_unknowns(
     addresses_payload: dict, devices_payload: dict
 ) -> None:

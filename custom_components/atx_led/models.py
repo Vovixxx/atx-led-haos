@@ -366,7 +366,7 @@ def parse_scene(scene_id: str, raw: dict | None, name_fallback: str | None = Non
                 if parsed_scene is not None:
                     dali_scene = parsed_scene
                     break
-        for key in ("group", "group_addr", "short_addr"):
+        for key in ("group", "group_addr"):
             if key in raw:
                 parsed_group = _as_optional_int(raw.get(key))
                 if parsed_group is not None:
@@ -400,19 +400,22 @@ def parse_scenes(payload: object) -> list[SceneDevice]:
             payload = json.loads(payload)
         except json.JSONDecodeError:
             return []
+    if isinstance(payload, dict) and ("Scenes" in payload or "scenes" in payload):
+        nested = payload.get("Scenes")
+        if nested is None:
+            nested = payload.get("scenes")
+        payload = nested
     items: list[tuple[str, dict | None, str | None]] = []
     if isinstance(payload, dict):
-        nested = payload.get("Scenes") or payload.get("scenes")
-        if isinstance(nested, list):
-            payload = nested
-        elif all(isinstance(value, dict) for value in payload.values()):
-            for scene_id, raw in payload.items():
-                if str(scene_id) in {"Scenes", "scenes"}:
-                    continue
-                items.append((str(scene_id), raw if isinstance(raw, dict) else None, None))
-        else:
-            return []
-    if isinstance(payload, list):
+        for scene_id, raw in payload.items():
+            if str(scene_id) in {"Scenes", "scenes", "ok"}:
+                continue
+            if isinstance(raw, dict):
+                name = raw.get("name") or raw.get("value") or raw.get("dev_name")
+                items.append((str(scene_id), raw, str(name) if name else None))
+            elif isinstance(raw, str) and raw:
+                items.append((str(scene_id), None, raw))
+    elif isinstance(payload, list):
         for index, item in enumerate(payload):
             if isinstance(item, dict) and item.get("key"):
                 items.append((str(item["key"]), item, str(item.get("value") or item["key"])))
@@ -421,7 +424,7 @@ def parse_scenes(payload: object) -> list[SceneDevice]:
             elif isinstance(item, str) and item:
                 items.append((item, None, item))
             elif isinstance(item, dict):
-                items.append((str(item.get("dev_name") or index), item, None))
+                items.append((str(item.get("dev_name") or item.get("name") or index), item, None))
     scenes: list[SceneDevice] = []
     seen: set[str] = set()
     for scene_id, raw, name_fallback in items:
@@ -606,4 +609,29 @@ def apply_group_patches(
             updated[addr] = merged
             changed = True
     return updated if changed else groups
+
+
+def preserve_group_live_state(
+    previous: dict[str, GroupDevice], discovered: dict[str, GroupDevice]
+) -> dict[str, GroupDevice]:
+    """Keep WebSocket group state when an HTTP poll omits on/level/members."""
+    if not previous:
+        return discovered
+    merged: dict[str, GroupDevice] = {}
+    for device_id, group in discovered.items():
+        old = previous.get(device_id)
+        if old is None:
+            merged[device_id] = group
+            continue
+        updates: dict[str, object] = {}
+        if group.is_on is None and old.is_on is not None:
+            updates["is_on"] = old.is_on
+        if group.stored_level is None and old.stored_level is not None:
+            updates["stored_level"] = old.stored_level
+        if group.color_temp_k is None and old.color_temp_k is not None:
+            updates["color_temp_k"] = old.color_temp_k
+        if not group.members and old.members:
+            updates["members"] = old.members
+        merged[device_id] = replace(group, **updates) if updates else group
+    return merged
 

@@ -300,15 +300,10 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 level = ha_brightness_to_dali(
                     int(kwargs[ATTR_BRIGHTNESS]), group.min_level, group.max_level
                 )
-                if use_hub_device_level_for_brightness(group.is_on) and level > 0:
-                    await self.coordinator.client.async_set_device_level(
-                        group.device_id, level
-                    )
-                else:
-                    await self._async_set_level(group, level)
+                await self._async_set_level(group, level)
             elif not group.is_on:
                 await self._async_set_level(group, _restore_level(group))
-        except ATXLEDError as err:
+        except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
 
@@ -318,7 +313,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
             raise HomeAssistantError("Group is unavailable")
         try:
             await self._async_set_level(group, 0)
-        except ATXLEDError as err:
+        except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
 
