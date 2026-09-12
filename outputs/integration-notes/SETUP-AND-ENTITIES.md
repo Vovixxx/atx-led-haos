@@ -35,6 +35,8 @@ Base on/off on `dev_on`, not raw `level > 0`. Preserve last stored brightness wh
 
 Brightness uses the locked hub UI mapping `(raw - min) / (max - min)`. Handle zero, minimum, maximum, rounding, and invalid/equal min/max values explicitly.
 
+On/off uses raw DAPC so the gear/hub fade for switching still applies. Brightness changes while the light is already on use `POST /dali/api/devices/{id}` with `level`, matching the hub UI dim path.
+
 ## Color temperature
 
 Expose only when `has_color_temp` is true. The valid Kelvin range comes from `user_warm` / `user_cool` as mireds. Control uses `POST /dali/api/devices/{id}` with `color_temp_k`. Do not interchange physical/user mireds with kelvin or use arbitrary `color_cct_*` defaults.

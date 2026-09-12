@@ -23,8 +23,9 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 ## Behavior
 
 - One light entity per commissioned DALI fixture (not groups, buttons, IO, or relays).
-- On/off and brightness use `POST /dali/api/send-raw` Direct Arc Power Control.
+- On/off uses `POST /dali/api/send-raw` Direct Arc Power Control.
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
+- Brightness changes while a light is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply.
 - Color-temperature fixtures expose a Kelvin slider.
 - State updates immediately from `/ws/dali/devices` when the hub reports a change. HTTP `/dali/api/devices` is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.
 - Hub identity currently falls back to the host address. Use Reconfigure to change the IP without recreating entities.

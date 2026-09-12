@@ -124,3 +124,19 @@ async def test_connection_error_wraps_os_error() -> None:
 def test_devices_websocket_url_is_verified_path() -> None:
     client = ATXLEDClient(host="192.168.1.50", session=FakeSession({}))
     assert client.websocket_devices_url == "ws://192.168.1.50/ws/dali/devices"
+
+
+async def test_set_device_level_posts_hub_level() -> None:
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/devices/0_s_51"): FakeResponse(
+                200, {"ok": True}
+            )
+        }
+    )
+    client = _client(session)
+    await client.async_set_device_level("0_s_51", 180)
+    method, url, kwargs = session.calls[0]
+    assert method == "POST"
+    assert url.endswith("/dali/api/devices/0_s_51")
+    assert kwargs["json"] == {"level": 180}

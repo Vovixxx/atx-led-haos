@@ -48,3 +48,8 @@ def dali_to_ha_brightness(raw_level: int, min_level: int, max_level: int) -> int
     ratio = (raw_level - minimum) / (maximum - minimum)
     ha = round(ratio * 255)
     return max(1, min(255, ha))
+
+
+def use_hub_device_level_for_brightness(is_on: bool | None) -> bool:
+    """Dim while already on uses the hub device POST so fade can apply."""
+    return is_on is True

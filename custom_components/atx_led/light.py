@@ -17,7 +17,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .brightness import dali_to_ha_brightness, ha_brightness_to_dali
+from .brightness import dali_to_ha_brightness, ha_brightness_to_dali, use_hub_device_level_for_brightness
 from .client import ATXLEDError
 from .const import ATTR_DALI_CHANNEL, ATTR_DALI_SHORT_ADDRESS, ATTR_DALI_STATUS
 from .coordinator import ATXLEDConfigEntry, ATXLEDCoordinator
@@ -153,9 +153,14 @@ class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 level = ha_brightness_to_dali(
                     int(kwargs[ATTR_BRIGHTNESS]), device.min_level, device.max_level
                 )
-                await self.coordinator.client.async_set_level(
-                    device.channel, device.short_addr, level
-                )
+                if use_hub_device_level_for_brightness(device.is_on) and level > 0:
+                    await self.coordinator.client.async_set_device_level(
+                        device.device_id, level
+                    )
+                else:
+                    await self.coordinator.client.async_set_level(
+                        device.channel, device.short_addr, level
+                    )
             elif not device.is_on:
                 level = (
                     device.stored_level

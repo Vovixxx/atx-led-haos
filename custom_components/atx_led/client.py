@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from .models import LightDevice, normalize_host, reconcile_lights
-from .protocol import dapc_frame, decode_send_raw_payload, SendRawResult
+from .protocol import DALI_MAX_ARC_LEVEL, dapc_frame, decode_send_raw_payload, SendRawResult
 
 DEFAULT_TIMEOUT = 10.0
 
@@ -149,4 +149,14 @@ class ATXLEDClient:
                 "post",
                 f"/dali/api/devices/{device_id}",
                 json={"color_temp_k": int(kelvin)},
+            )
+
+    async def async_set_device_level(self, device_id: str, level: int) -> Any:
+        """Set brightness using the hub device endpoint so configured fade can apply."""
+        raw = max(0, min(int(level), DALI_MAX_ARC_LEVEL))
+        async with self._lock:
+            return await self._request(
+                "post",
+                f"/dali/api/devices/{device_id}",
+                json={"level": raw},
             )

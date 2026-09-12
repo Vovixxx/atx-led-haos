@@ -1,4 +1,9 @@
-from atx_led.brightness import dali_to_ha_brightness, ha_brightness_to_dali, normalize_level_range
+from atx_led.brightness import (
+    dali_to_ha_brightness,
+    ha_brightness_to_dali,
+    normalize_level_range,
+    use_hub_device_level_for_brightness,
+)
 
 
 def test_verified_raw_185_is_locked_hub_ui_68_percent() -> None:
@@ -38,3 +43,9 @@ def test_equal_min_max_uses_that_level_when_on() -> None:
 
 def test_invalid_inverted_range_swaps_to_usable_bounds() -> None:
     assert normalize_level_range(200, 50) == (50, 200)
+
+
+def test_dim_while_on_uses_hub_device_level() -> None:
+    assert use_hub_device_level_for_brightness(True) is True
+    assert use_hub_device_level_for_brightness(False) is False
+    assert use_hub_device_level_for_brightness(None) is False

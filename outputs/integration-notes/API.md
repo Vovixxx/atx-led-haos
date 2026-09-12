@@ -25,7 +25,7 @@ Returns an object keyed by address ID. Relevant fields:
 - Capabilities: `has_color_temp`, `has_color_rgb`, `is_button`, `is_io_device`, `is_passive`, `is_relay_device`, `dev_type`.
 - Dimming limits: `min_level`, `max_level`, `phy_min_level`.
 - Color: `color_temp_k`, `color_rgbw`, `phy_warm`, `phy_cool`, `user_warm`, `user_cool`, additional `color_k_*` and `color_cct_*` fields.
-- Configuration: `groups`, fades, `power_on_level`, `fail_level`, `hue_hidden`.
+- Configuration: `groups`, `fade_up`, `fade_down`, `power_on_level`, `fail_level`, `hue_hidden`.
 
 Do not interpret `level > 0` alone as on. A fixture can report `dev_on:false` while still storing a last `level`. Direct DALI actual-level queries can return 0 in that case.
 
@@ -90,9 +90,11 @@ Wrong paths (`/ws/dali/devices/0_s_1`, query strings, trailing slash) drop the c
 
 Verified: `POST /dali/api/devices/{id}` with `color_temp_k` sets Kelvin on color-temperature fixtures.
 
+Verified for dimming while on: `POST /dali/api/devices/{id}` with `level` so the hub can apply its configured fade. On/off still uses `send-raw` DAPC.
+
 Observed in web-interface source; not independently used by this integration:
 
-- POST `/dali/api/devices/{id}` with fields such as `dev_on` and `level`.
+- POST `/dali/api/devices/{id}` with `dev_on`.
 - GET `/dali/api/scenes`.
 - Device controls use debounced writes. Basic view raw slider bounds are 0–254.
 
