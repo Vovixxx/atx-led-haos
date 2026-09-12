@@ -1,0 +1,14 @@
+{
+  "0_sc_0": {
+    "dev_name": "Evening",
+    "channel": 0,
+    "scene": 0,
+    "members": ["0_s_1", "0_s_11"]
+  },
+  "0_sc_1": {
+    "dev_name": "Night",
+    "channel": 0,
+    "scene": 1,
+    "group": 1
+  }
+}

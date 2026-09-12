@@ -95,10 +95,13 @@ Verified for dimming while on: `POST /dali/api/devices/{id}` with `level` so the
 Observed in web-interface source; not independently used by this integration:
 
 - POST `/dali/api/devices/{id}` with `dev_on`.
-- GET `/dali/api/scenes`.
 - Device controls use debounced writes. Basic view raw slider bounds are 0–254.
 
-Do not present untested source-observed endpoints as integration controls.
+GET `/dali/api/scenes` is now requested during inventory. A missing or unusable payload must not fail light or group discovery. Scene records are parsed from an object map, a `Scenes` list, or `{key,value}` items. Recall uses DALI GO TO SCENE (`0x10`–`0x1F`) on a listed group or on member short addresses. Do not send broadcast `hFFxx` or `hFE00`.
+
+Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead.
+
+Do not present remaining untested source-observed endpoints as integration controls.
 
 ## Serial documentation versus HTTP
 

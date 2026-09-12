@@ -9,7 +9,7 @@ During setup, discover the hub's known DALI devices and automatically create ent
 1. Enter the hub host; support credentials only if required by the actual API configuration.
 2. Validate connectivity and response structure with read-only GET requests.
 3. Read `/dali/api/addresses` and `/dali/api/devices`; reconcile their IDs.
-4. Create the hub device and one light entity per eligible light record, keeping channel and short address as separate fields.
+4. Create the hub device, one light entity per eligible light record, one light entity per DALI or virtual group, and one scene entity per named hub scene. Keep channel, short address, and group address as separate fields.
 5. Derive capabilities from device flags, not names or merely populated color fields.
 6. Read current state. No light state changes during setup.
 7. Show discovered-device count and actionable connection or response errors. Support rediscovery later without duplicating entities.
@@ -23,9 +23,10 @@ This is discovery of already commissioned gear. Do not invoke physical commissio
 - `has_color_rgb:true`: expose an RGB-capable light only after verifying the actual API color representation and commands. Do not assume RGB from populated color fields.
 - Explicit relay-only devices: on/off entity behavior after verifying semantics.
 - Buttons, IO and passive devices: do not misclassify as ordinary lights; defer dedicated entity platforms.
-- Groups and virtual groups: separate later feature; do not turn them into individual fixture records or broadcast targets.
+- Groups and virtual groups: separate light entities (`{hub_id}_g_{channel}_{group}` / `{hub_id}_v_{channel}_{group}`). Do not turn them into individual fixture records or import the broadcast `all` target.
+- Hub scenes: scene entities when a DALI scene number is present. Recall uses group or per-fixture GO TO SCENE, not broadcast.
 
-Unique IDs are `{hub_id}_{channel}_{short_addr}`. Hub identity currently falls back to the host address. Do not use the light name or `serial_nb` alone: serial values can repeat. Reconfigure updates the host without creating new unique IDs.
+Unique IDs for fixtures are `{hub_id}_{channel}_{short_addr}`. Hub identity currently falls back to the host address. Do not use the light name or `serial_nb` alone: serial values can repeat. Reconfigure updates the host without creating new unique IDs.
 
 Use the stored device name as the initial display name. User renames in Home Assistant should persist. Hue discovery visibility (`hue_hidden`) must not prevent native integration discovery.
 
@@ -45,4 +46,4 @@ A stored `color_temp_k` can sit outside the listed user/physical range. Preserve
 
 ## Updates and reliability
 
-The coordinator listens on `/ws/dali/devices` for immediate state. HTTP polling every 15 seconds remains the backup. Reconnect without replaying old light-changing requests. Serialize DALI traffic and avoid overlapping scans. Enable additional entities without controlling them.
+The coordinator listens on `/ws/dali/devices` and `/ws/dali/groups` for immediate state. HTTP polling every 15 seconds remains the backup. Reconnect without replaying old light-changing requests. Serialize DALI traffic and avoid overlapping scans. Enable additional entities without controlling them. Scene GET failures must not take lights or groups offline.

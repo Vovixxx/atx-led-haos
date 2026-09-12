@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "ATX LED Hub",
-        "description": "Enter the local hub address. Setup discovers already commissioned lights and does not turn them on, identify them, or change DALI addresses.",
+        "description": "Enter the local hub address. Setup discovers already commissioned lights, groups, and scenes and does not turn them on, identify them, or change DALI addresses.",
         "data": {
           "host": "Host",
           "username": "Username",
@@ -17,7 +17,7 @@
       },
       "reconfigure": {
         "title": "Reconfigure ATX LED Hub",
-        "description": "Update the hub address. Existing light entities are kept.",
+        "description": "Update the hub address. Existing light and scene entities are kept.",
         "data": {
           "host": "Host",
           "username": "Username",

@@ -12,7 +12,7 @@ from .client import ATXLEDClient
 from .const import DOMAIN, HUB_MODEL, MANUFACTURER
 from .coordinator import ATXLEDConfigEntry, ATXLEDCoordinator
 
-PLATFORMS = (Platform.LIGHT,)
+PLATFORMS = (Platform.LIGHT, Platform.SCENE)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 

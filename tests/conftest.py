@@ -38,3 +38,8 @@ def addresses_payload() -> dict:
 @pytest.fixture
 def devices_payload() -> dict:
     return json.loads((FIXTURE_DIR / "devices.json").read_text())
+
+
+@pytest.fixture
+def scenes_payload() -> dict:
+    return json.loads((FIXTURE_DIR / "scenes.json").read_text())

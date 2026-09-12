@@ -85,6 +85,14 @@ def test_color_range_uses_user_mireds_not_cct_defaults() -> None:
     assert maximum == 5000
 
 
+def test_group_membership_is_parsed_from_list(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    hall = next(light for light in lights if light.device_id == "0_s_1")
+    assert hall.group_membership == (1,)
+
+
 def test_stored_temp_outside_user_range_is_preserved(
     addresses_payload: dict, devices_payload: dict
 ) -> None:

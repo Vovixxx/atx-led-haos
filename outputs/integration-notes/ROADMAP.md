@@ -1,6 +1,6 @@
 # Integration roadmap
 
-Shipped in **0.2.0** as a HACS custom repository: https://github.com/Vovixxx/atx-led-haos
+Shipped in **0.3.0** as a HACS custom repository: https://github.com/Vovixxx/atx-led-haos
 
 ## Done
 
@@ -9,10 +9,11 @@ Shipped in **0.2.0** as a HACS custom repository: https://github.com/Vovixxx/atx
 3. **Home Assistant first release** — config flow, hub device, automatic light entities, on/off, brightness, Kelvin for supported fixtures.
 4. **State sync** — live WebSocket patches plus 15-second HTTP poll backup. Reconnect does not replay controls. `iot_class` is `local_push`.
 5. **Packaging (manual)** — HACS custom-repo layout, brand icons, install docs, redacted diagnostics.
+6. **Groups and scenes** — DALI groups and virtual groups as lights, `/ws/dali/groups` push, hub scene entities recalled without broadcast.
 
 ## Later
 
-- Groups and scenes.
+- Live-verify group DAPC, virtual-group device writes, and GET `/dali/api/scenes` payload shape on a hub.
 - RGB, if a hub advertises supported fixtures.
 - Buttons, IO, and relay platforms.
 - Diagnose DALI status flags when fixtures report driver or lamp-failure bits.
