@@ -34,5 +34,34 @@
       "already_configured": "This hub is already configured",
       "reconfigure_successful": "Hub connection updated"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Unsigned leftover drivers",
+        "description": "Pick a driver the hub could not characterize. Home Assistant stores mode and ranges locally and does not write them to the hub.",
+        "data": {
+          "device_id": "Driver"
+        }
+      },
+      "tune": {
+        "title": "Tune leftover driver",
+        "description": "Match min/max dim and Kelvin by sight. Min dim is Home Assistant 1%. RGB mode is stored but color picker waits until the hub RGB write is verified.",
+        "data": {
+          "mode": "Mode",
+          "min_level": "Min dim (raw 1-254)",
+          "max_level": "Max dim (raw 1-254)",
+          "kelvin_min": "Warm Kelvin",
+          "kelvin_max": "Cool Kelvin"
+        }
+      }
+    },
+    "error": {
+      "invalid_range": "Min dim must be below max dim, each between 1 and 254",
+      "invalid_kelvin": "Warm Kelvin must be below cool Kelvin"
+    },
+    "abort": {
+      "no_unsigned": "This hub has no unsigned leftover drivers to tune"
+    }
   }
 }

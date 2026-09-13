@@ -47,7 +47,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ATXLEDConfigEntry) -> bo
     coordinator.async_start_watch()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ATXLEDConfigEntry) -> None:
+    """Reload so unsigned override color modes refresh."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ATXLEDConfigEntry) -> bool:

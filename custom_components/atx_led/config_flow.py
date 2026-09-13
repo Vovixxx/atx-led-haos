@@ -6,14 +6,37 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
 from .client import ATXLEDApiError, ATXLEDAuthError, ATXLEDClient, ATXLEDConnectionError
-from .const import DOMAIN
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_UNSIGNED_OVERRIDES,
+    DOMAIN,
+    MODE_CCT,
+    MODE_DIMMER,
+    MODE_RGB,
+    MODE_RGB_CCT,
+)
 from .models import hub_unique_id, normalize_host
+from .unsigned import (
+    UnsignedOverrideError,
+    merge_unsigned_override,
+    normalize_unsigned_override,
+    suggested_tune_values,
+    unsigned_device_choices,
+)
+
+_MODE_OPTIONS = [
+    {"value": MODE_DIMMER, "label": "Dimmer"},
+    {"value": MODE_CCT, "label": "CCT"},
+    {"value": MODE_RGB, "label": "RGB"},
+    {"value": MODE_RGB_CCT, "label": "RGB+CCT"},
+]
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -44,6 +67,11 @@ class ATXLEDConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle an ATX LED config flow."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry) -> OptionsFlow:
+        return ATXLEDOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -117,4 +145,92 @@ class ATXLEDConfigFlow(ConfigFlow, domain=DOMAIN):
                 STEP_USER_DATA_SCHEMA, entry.data
             ),
             errors=errors,
+        )
+
+
+class ATXLEDOptionsFlow(OptionsFlow):
+    """Tune unsigned leftover drivers without writing hub configuration."""
+
+    def __init__(self) -> None:
+        self._device_id: str | None = None
+
+    def _unsigned_lights(self) -> dict:
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None or coordinator.data is None:
+            return {}
+        return {
+            device_id: light
+            for device_id, light in coordinator.data.lights.items()
+            if light.unsigned
+        }
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        lights = self._unsigned_lights()
+        choices = unsigned_device_choices(lights)
+        if not choices:
+            return self.async_abort(reason="no_unsigned")
+        if user_input is not None:
+            self._device_id = str(user_input[CONF_DEVICE_ID])
+            return await self.async_step_tune()
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE_ID): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": device_id, "label": label}
+                                for device_id, label in choices.items()
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_tune(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        lights = self._unsigned_lights()
+        device_id = self._device_id
+        if device_id is None or device_id not in lights:
+            return await self.async_step_init()
+        light = lights[device_id]
+        stored = (self.config_entry.options.get(CONF_UNSIGNED_OVERRIDES) or {}).get(device_id)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                override = normalize_unsigned_override(user_input)
+            except UnsignedOverrideError as err:
+                errors["base"] = err.code
+            else:
+                options = merge_unsigned_override(
+                    dict(self.config_entry.options), device_id, override
+                )
+                return self.async_create_entry(title="", data=options)
+        suggested = suggested_tune_values(light, stored if isinstance(stored, dict) else None)
+        return self.async_show_form(
+            step_id="tune",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required("mode"): SelectSelector(
+                            SelectSelectorConfig(
+                                options=_MODE_OPTIONS,
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Required("min_level"): int,
+                        vol.Required("max_level"): int,
+                        vol.Optional("kelvin_min"): int,
+                        vol.Optional("kelvin_max"): int,
+                    }
+                ),
+                suggested,
+            ),
+            errors=errors,
+            description_placeholders={"name": light.name, "device_id": device_id},
         )
