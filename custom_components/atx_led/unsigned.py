@@ -136,6 +136,21 @@ def suggested_tune_values(
     return values
 
 
+def unsigned_diagnostics(light: LightDevice) -> dict[str, object]:
+    payload: dict[str, object] = {"unsigned": light.unsigned}
+    if not light.unsigned_mode:
+        return payload
+    payload["unsigned_mode"] = light.unsigned_mode
+    payload["min_level"] = light.min_level
+    payload["max_level"] = light.max_level
+    if light.has_color_temp:
+        minimum, maximum = color_temp_range_kelvin(light.user_warm, light.user_cool)
+        if minimum and maximum:
+            payload["kelvin_min"] = minimum
+            payload["kelvin_max"] = maximum
+    return payload
+
+
 def merge_unsigned_override(
     options: dict, device_id: str, override: dict
 ) -> dict:

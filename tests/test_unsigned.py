@@ -15,6 +15,7 @@ from atx_led.unsigned import (
     normalize_unsigned_override,
     suggested_tune_values,
     unsigned_device_choices,
+    unsigned_diagnostics,
 )
 
 
@@ -260,6 +261,33 @@ def test_choices_list_only_unsigned(
     assert "0_s_16" in choices
     assert "0_s_1" not in choices
     assert choices["0_s_16"] == "Cove Light (0_s_16)"
+
+
+def test_diagnostics_include_applied_override(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
+    updated = apply_unsigned_overrides(
+        lights,
+        {
+            "0_s_16": {
+                "mode": MODE_CCT,
+                "min_level": 50,
+                "max_level": 254,
+                "kelvin_min": 2700,
+                "kelvin_max": 5000,
+            }
+        },
+    )
+    payload = unsigned_diagnostics(updated["0_s_16"])
+    assert payload["unsigned"] is True
+    assert payload["unsigned_mode"] == MODE_CCT
+    assert payload["min_level"] == 50
+    assert payload["max_level"] == 254
+    assert "kelvin_min" in payload
+    assert "kelvin_max" in payload
+    hall = unsigned_diagnostics(updated["0_s_1"])
+    assert hall == {"unsigned": False}
 
 
 def test_merge_override_preserves_other_devices() -> None:

@@ -8,6 +8,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 
 from .coordinator import ATXLEDConfigEntry
+from .unsigned import unsigned_diagnostics
 
 
 async def async_get_config_entry_diagnostics(
@@ -29,6 +30,7 @@ async def async_get_config_entry_diagnostics(
                 "has_color_temp": light.has_color_temp,
                 "status": light.status,
                 "available": light.available,
+                **unsigned_diagnostics(light),
             }
             for light in coordinator.data.lights.values()
         ]
