@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import ATXLEDClient, ATXLEDError
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_UNSIGNED_OVERRIDES, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .models import (
     GroupDevice,
     LightDevice,
@@ -24,6 +24,7 @@ from .models import (
     parse_ws_patches,
     preserve_group_live_state,
 )
+from .unsigned import apply_unsigned_overrides
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -192,6 +193,10 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
         except ATXLEDError as err:
             raise UpdateFailed(str(err)) from err
         lights_map = {light.device_id: light for light in lights}
+        lights_map = apply_unsigned_overrides(
+            lights_map,
+            self.config_entry.options.get(CONF_UNSIGNED_OVERRIDES),
+        )
         discovered_groups = {group.device_id: group for group in groups}
         previous_groups = self.data.groups if self.data is not None else {}
         groups_map = preserve_group_live_state(previous_groups, discovered_groups)
