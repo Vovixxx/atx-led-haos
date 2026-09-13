@@ -33,6 +33,8 @@ class LightDevice:
     is_relay_device: bool
     group_membership: tuple[int, ...] = ()
     available: bool = True
+    unsigned: bool = False
+    unsigned_mode: str | None = None
 
     @property
     def unique_suffix(self) -> str:
@@ -126,6 +128,17 @@ def _as_int(value: object, default: int) -> int:
     return default if parsed is None else parsed
 
 
+def is_unsigned_driver(raw: dict) -> bool:
+    """True when the hub could not characterize the fixture."""
+    if raw.get("dev_type") not in (None, "", 0):
+        return False
+    if _as_optional_int(raw.get("serial_nb")) not in (None, 0):
+        return False
+    if _as_optional_int(raw.get("fw_version")) not in (None, 0):
+        return False
+    return True
+
+
 def _preferred_name(*candidates: object, fallback: str) -> str:
     """Pick the first non-empty label. Prefer Hue/user names over generic Group N."""
     for candidate in candidates:
@@ -171,6 +184,8 @@ def parse_device(device_id: str, raw: dict) -> LightDevice | None:
         is_passive=_as_bool(raw.get("is_passive")),
         is_relay_device=_as_bool(raw.get("is_relay_device")),
         group_membership=_parse_group_membership(raw.get("groups")),
+        unsigned=is_unsigned_driver(raw),
+        unsigned_mode=None,
     )
 
 
