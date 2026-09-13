@@ -21,6 +21,7 @@ This is discovery of already commissioned gear. Do not invoke physical commissio
 - Dimmable, no color capability: brightness light.
 - `has_color_temp:true`: brightness + color-temperature light.
 - `has_color_rgb:true`: expose an RGB-capable light only after verifying the actual API color representation and commands. Do not assume RGB from populated color fields.
+- Unsigned leftovers (`dev_type` empty and serial/firmware zero): brightness-only until Configure sets a Home Assistant-only override (`dimmer` / `cct` / `rgb` / `rgb_cct`, raw min/max, optional Kelvin ends). Do not write those values to the hub. RGB picker remains deferred until the color write is verified.
 - Explicit relay-only devices: on/off entity behavior after verifying semantics.
 - Buttons, IO and passive devices: do not misclassify as ordinary lights; defer dedicated entity platforms.
 - Groups and virtual groups: separate light entities (`{hub_id}_g_{channel}_{group}` / `{hub_id}_v_{channel}_{group}`). Do not turn them into individual fixture records or import the broadcast `all` target. Prefer `hue_name`, then `dev_name`, then the addresses label.

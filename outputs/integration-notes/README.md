@@ -1,6 +1,6 @@
 # ATX LED integration notes
 
-Updated 2026-09-12. Custom integration: `custom_components/atx_led` (0.3.0, HACS custom repository).
+Updated 2026-09-12. Custom integration: `custom_components/atx_led` (0.4.0, HACS custom repository).
 
 ## Start here
 

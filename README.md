@@ -31,6 +31,7 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
 - Brightness changes while a fixture is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply. DALI groups keep using group DAPC.
 - Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Groups expose Kelvin when member fixtures do; writes go to those members, not an unverified group device endpoint.
+- Leftover drivers the hub cannot characterize (empty type, zero serial/firmware) stay dimmers until you open **Configure** on the integration, pick a mode, and set min/max dim and Kelvin by sight. Those values stay in Home Assistant and are not written to the hub.
 - Scene recall sends DALI GO TO SCENE to a listed group or to member fixtures. It does not send broadcast `hFFxx`.
 - State updates immediately from `/ws/dali/devices` and `/ws/dali/groups` when the hub reports a change. HTTP inventory (`addresses`, `devices`, best-effort `groups` and `scenes`) is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.
 - Hub identity currently falls back to the host address. Use Reconfigure to change the IP without recreating entities.

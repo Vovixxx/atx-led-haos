@@ -10,6 +10,7 @@ Shipped in **0.3.0** as a HACS custom repository: https://github.com/Vovixxx/atx
 4. **State sync** — live WebSocket patches plus 15-second HTTP poll backup. Reconnect does not replay controls. `iot_class` is `local_push`.
 5. **Packaging (manual)** — HACS custom-repo layout, brand icons, install docs, redacted diagnostics.
 6. **Groups and scenes** — DALI groups and virtual groups as lights, `/ws/dali/groups` push, hub scene entities recalled without broadcast. Inventory reads `/dali/api/groups` when present, uses `hue_name` when the hub provides it, derives missing group on/off from members, and exposes group Kelvin from member CCT fixtures.
+7. **Unsigned leftovers** — Configure flow stores HA-only mode, dim range, and Kelvin ends for drivers the hub cannot characterize. RGB picker still unverified.
 
 ## Later
 
