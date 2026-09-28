@@ -174,7 +174,34 @@ def test_group_name_falls_back_when_hue_name_missing() -> None:
         }
     }
     groups = reconcile_groups(addresses, devices, [])
-    assert groups[0].name == "Group 1"
+    assert groups[0].name == "Dining"
+
+
+def test_groups_api_name_enriches_existing_device_record() -> None:
+    addresses = {"Groups": [{"key": "0_g_5", "value": "Group 5"}]}
+    devices = {"0_g_5": {"channel": 0, "dev_name": "Group 5", "dev_on": False}}
+    groups_api = {"0_g_5": {"hue_name": "Kitchen Spots", "level": 90, "dev_on": True}}
+    merged = merge_group_records(devices, groups_api)
+    assert merged["0_g_5"]["hue_name"] == "Kitchen Spots"
+    assert devices["0_g_5"] == {"channel": 0, "dev_name": "Group 5", "dev_on": False}
+    group = reconcile_groups(addresses, merged)[0]
+    assert group.name == "Kitchen Spots"
+    assert group.stored_level == 90
+    assert group.is_on is True
+
+
+def test_groups_api_empty_name_does_not_erase_existing_name() -> None:
+    devices = {"0_g_5": {"channel": 0, "dev_name": "Kitchen Spots"}}
+    merged = merge_group_records(devices, {"0_g_5": {"dev_name": "", "hue_name": None}})
+    assert merged["0_g_5"]["dev_name"] == "Kitchen Spots"
+
+
+def test_generic_group_patch_keeps_friendly_address_name() -> None:
+    addresses = {"Groups": [{"key": "0_g_5", "value": "Kitchen Spots"}]}
+    devices = {"0_g_5": {"channel": 0, "dev_name": "Group 5"}}
+    group = reconcile_groups(addresses, devices)[0]
+    updated = apply_group_patches({group.device_id: group}, [("0_g_5", {"dev_name": "Group 5", "level": 80})])
+    assert updated[group.device_id].name == "Kitchen Spots"
 
 
 def test_groups_api_device_ids_become_member_lights_and_keep_hub_state() -> None:

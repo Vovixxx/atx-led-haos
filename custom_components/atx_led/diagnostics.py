@@ -65,6 +65,7 @@ async def async_get_config_entry_diagnostics(
     return {
         "hub_id": coordinator.hub_id,
         "host": entry.data.get(CONF_HOST),
+        "optional_endpoint_errors": dict(coordinator.client.optional_endpoint_errors),
         "light_count": len(lights),
         "group_count": len(groups),
         "scene_count": len(scenes),

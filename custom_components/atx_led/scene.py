@@ -81,7 +81,16 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
     @property
     def available(self) -> bool:
         scene = self._scene
-        return super().available and scene is not None and scene.dali_scene is not None
+        return (
+            super().available
+            and scene is not None
+            and scene.dali_scene is not None
+            and (
+                scene.channel is not None
+                if scene.group_addr is not None
+                else bool(scene.members)
+            )
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

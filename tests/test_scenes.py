@@ -64,3 +64,8 @@ def test_scene_id_can_supply_channel_and_number() -> None:
     scenes = parse_scenes([{"key": "1_sc_4", "value": "Upstairs"}])
     assert scenes[0].channel == 1
     assert scenes[0].dali_scene == 4
+
+
+def test_numeric_scene_members_use_scene_channel() -> None:
+    scene = parse_scenes({"1_sc_4": {"scene": 4, "members": [3]}})[0]
+    assert scene.members == ("1_s_3",)

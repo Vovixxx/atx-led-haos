@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -101,6 +102,10 @@ async def test_missing_scenes_endpoint_does_not_fail_inventory(
     assert lights
     assert groups
     assert scenes == []
+    assert client.optional_endpoint_errors == {
+        "groups": "ATXLEDApiError",
+        "scenes": "ATXLEDApiError",
+    }
 
 
 async def test_401_is_auth_error() -> None:
@@ -146,6 +151,28 @@ async def test_http_error_is_not_treated_as_off() -> None:
     client = _client(session)
     with pytest.raises(ATXLEDApiError):
         await client.async_set_level(channel=0, short_addr=1, level=0)
+
+
+async def test_send_raw_ok_false_is_an_error() -> None:
+    session = FakeSession(
+        {("POST", "http://192.168.1.50/dali/api/send-raw"): FakeResponse(200, {"ok": False})}
+    )
+    with pytest.raises(ATXLEDApiError, match="rejected"):
+        await _client(session).async_set_level(channel=0, short_addr=1, level=80)
+
+
+async def test_http_timeout_is_connection_error() -> None:
+    class SlowResponse(FakeResponse):
+        async def json(self) -> Any:
+            await asyncio.sleep(0.1)
+            return await super().json()
+
+    session = FakeSession(
+        {("GET", "http://192.168.1.50/dali/api/devices"): SlowResponse(200, {})}
+    )
+    client = ATXLEDClient(host="192.168.1.50", session=session, timeout=0.01)
+    with pytest.raises(ATXLEDConnectionError):
+        await client.async_get_devices()
 
 
 async def test_connection_error_wraps_os_error() -> None:
@@ -215,6 +242,30 @@ async def test_recall_scene_prefers_group_go_to_scene(scenes_payload: dict) -> N
     await client.async_recall_scene(scene, {})
     _method, _url, kwargs = session.calls[0]
     assert kwargs["json"] == {"channel": 0, "commands": ["h8311"]}
+
+
+async def test_scene_without_explicit_targets_does_not_recall_every_light(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = {
+        light.device_id: light
+        for light in reconcile_lights(addresses_payload, devices_payload)
+    }
+    scene = parse_scenes({"0_sc_2": {"scene": 2, "channel": 0}})[0]
+    session = FakeSession({})
+    with pytest.raises(ATXLEDApiError, match="no member fixtures"):
+        await _client(session).async_recall_scene(scene, lights)
+    assert session.calls == []
+
+
+async def test_scene_with_members_on_another_channel_is_rejected() -> None:
+    scene = parse_scenes(
+        {"0_sc_2": {"scene": 2, "channel": 0, "members": ["1_s_4"]}}
+    )[0]
+    session = FakeSession({})
+    with pytest.raises(ATXLEDApiError, match="do not share"):
+        await _client(session).async_recall_scene(scene)
+    assert session.calls == []
 
 
 async def test_set_device_level_posts_hub_level() -> None:
@@ -294,3 +345,15 @@ async def test_set_group_color_temp_writes_member_devices(
     posted = [url for _method, url, _kwargs in session.calls]
     assert posted == ["http://192.168.1.50/dali/api/devices/0_s_1"]
     assert session.calls[0][2]["json"] == {"color_temp_k": 3000}
+
+
+async def test_group_color_temp_without_known_members_does_not_post_to_group(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    from atx_led.models import reconcile_groups
+
+    group = reconcile_groups(addresses_payload, devices_payload)[0]
+    session = FakeSession({})
+    with pytest.raises(ATXLEDApiError, match="no known"):
+        await _client(session).async_set_group_color_temp(group, {}, 3000)
+    assert session.calls == []

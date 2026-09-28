@@ -13,6 +13,7 @@ from homeassistant.components.light import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -127,6 +128,11 @@ class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
     def _device(self) -> LightDevice | None:
         return self.coordinator.get_light(self.device_id)
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._apply_capabilities(self._device)
+        super()._handle_coordinator_update()
+
     @property
     def available(self) -> bool:
         device = self._device
@@ -230,7 +236,12 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
 
     def _apply_capabilities(self, group: GroupDevice | None) -> None:
         limits = _kelvin_limits(group) if group else None
-        if group and group.has_color_temp and limits:
+        lights = self.coordinator.data.lights if self.coordinator.data else {}
+        has_cct_member = bool(group) and any(
+            member_id in lights and lights[member_id].has_color_temp
+            for member_id in group.members
+        )
+        if group and group.has_color_temp and limits and has_cct_member:
             self._attr_supported_color_modes = {ColorMode.COLOR_TEMP}
             self._attr_color_mode = ColorMode.COLOR_TEMP
             self._attr_min_color_temp_kelvin = limits[0]
@@ -242,6 +253,17 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
     @property
     def _group(self) -> GroupDevice | None:
         return self.coordinator.get_group(self.device_id)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        group = self._group
+        self._apply_capabilities(group)
+        if group is not None and self.device_entry is not None:
+            if self.device_entry.name != group.name:
+                self.device_entry = dr.async_get(self.hass).async_update_device(
+                    self.device_entry.id, name=group.name
+                )
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -320,4 +342,3 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
-

@@ -12,10 +12,10 @@ from .models import (
     SceneDevice,
     merge_group_records,
     normalize_host,
+    parse_addr_id,
     parse_scenes,
     reconcile_groups,
     reconcile_lights,
-    scene_short_addrs,
 )
 from .protocol import (
     DALI_MAX_ARC_LEVEL,
@@ -24,6 +24,7 @@ from .protocol import (
     go_to_scene_frame,
     group_dapc_frame,
     group_go_to_scene_frame,
+    SHORT_ADDR_MAX,
     SendRawResult,
 )
 
@@ -63,6 +64,7 @@ class ATXLEDClient:
         self._password = password or None
         self._timeout = timeout
         self._lock = asyncio.Lock()
+        self.optional_endpoint_errors: dict[str, str] = {}
 
     @property
     def base_url(self) -> str:
@@ -85,18 +87,21 @@ class ATXLEDClient:
             request_kwargs["auth"] = auth
         try:
             request = getattr(self._session, method.lower())
-            async with request(url, **request_kwargs) as response:
-                if response.status == 401:
-                    raise ATXLEDAuthError("Hub authentication failed")
-                if response.status >= 400:
-                    body = await response.text()
-                    raise ATXLEDApiError(f"HTTP {response.status}: {body[:200]}")
-                try:
-                    return await response.json()
-                except json.JSONDecodeError as err:
-                    raise ATXLEDApiError("Hub returned non-JSON") from err
-                except Exception as err:
-                    raise ATXLEDApiError("Hub returned an unusable body") from err
+            async with asyncio.timeout(self._timeout):
+                async with request(url, **request_kwargs) as response:
+                    if response.status == 401:
+                        raise ATXLEDAuthError("Hub authentication failed")
+                    if response.status >= 400:
+                        body = await response.text()
+                        raise ATXLEDApiError(f"HTTP {response.status}: {body[:200]}")
+                    try:
+                        return await response.json()
+                    except json.JSONDecodeError as err:
+                        raise ATXLEDApiError("Hub returned non-JSON") from err
+                    except TimeoutError:
+                        raise
+                    except Exception as err:
+                        raise ATXLEDApiError("Hub returned an unusable body") from err
         except ATXLEDError:
             raise
         except OSError as err:
@@ -122,17 +127,25 @@ class ATXLEDClient:
     async def async_get_scenes(self) -> object:
         """Read hub scenes. Missing or unusable payloads become an empty list."""
         try:
-            return await self._request("get", "/dali/api/scenes")
-        except ATXLEDError:
+            payload = await self._request("get", "/dali/api/scenes")
+        except ATXLEDError as err:
+            self.optional_endpoint_errors["scenes"] = type(err).__name__
             return []
+        self.optional_endpoint_errors.pop("scenes", None)
+        return payload
 
     async def async_get_groups(self) -> object:
         """Read hub group records. Missing or unusable payloads become an empty object."""
         try:
             payload = await self._request("get", "/dali/api/groups")
-        except ATXLEDError:
+        except ATXLEDError as err:
+            self.optional_endpoint_errors["groups"] = type(err).__name__
             return {}
-        return payload if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            self.optional_endpoint_errors["groups"] = "InvalidPayload"
+            return {}
+        self.optional_endpoint_errors.pop("groups", None)
+        return payload
 
     async def async_discover_lights(self) -> list[LightDevice]:
         addresses = await self.async_get_addresses()
@@ -160,7 +173,10 @@ class ATXLEDClient:
             )
         if not isinstance(payload, dict):
             raise ATXLEDApiError("send-raw response was not an object")
-        return decode_send_raw_payload(payload)
+        result = decode_send_raw_payload(payload)
+        if not result.ok:
+            raise ATXLEDApiError("Hub rejected the DALI command")
+        return result
 
     async def async_set_level(self, channel: int, short_addr: int, level: int) -> SendRawResult:
         return await self.async_send_raw(channel, [dapc_frame(short_addr, level)])
@@ -206,21 +222,27 @@ class ATXLEDClient:
     async def async_set_color_temp_k(self, device_id: str, kelvin: int) -> Any:
         """Set color temperature using the hub device endpoint (source-observed)."""
         async with self._lock:
-            return await self._request(
+            payload = await self._request(
                 "post",
                 f"/dali/api/devices/{device_id}",
                 json={"color_temp_k": int(kelvin)},
             )
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                raise ATXLEDApiError("Hub rejected the color temperature command")
+            return payload
 
     async def async_set_device_level(self, device_id: str, level: int) -> Any:
         """Set brightness using the hub device endpoint so configured fade can apply."""
         raw = max(0, min(int(level), DALI_MAX_ARC_LEVEL))
         async with self._lock:
-            return await self._request(
+            payload = await self._request(
                 "post",
                 f"/dali/api/devices/{device_id}",
                 json={"level": raw},
             )
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                raise ATXLEDApiError("Hub rejected the brightness command")
+            return payload
 
     async def async_recall_scene(
         self,
@@ -229,27 +251,38 @@ class ATXLEDClient:
     ) -> SendRawResult:
         """Recall a DALI scene without broadcast.
 
-        Prefer a listed group, then listed members, then known lights on the
-        scene channel. Virtual/hub-only scenes without a DALI number fail.
+        Recall only listed groups or members. Virtual/hub-only scenes without
+        a DALI number or an unambiguous channel fail.
         """
         if scene.dali_scene is None:
             raise ATXLEDApiError("Scene has no DALI scene number")
-        channel = 0 if scene.channel is None else int(scene.channel)
         if scene.group_addr is not None:
+            if scene.channel is None:
+                raise ATXLEDApiError("Scene group has no DALI channel")
             return await self.async_send_raw(
-                channel, [group_go_to_scene_frame(scene.group_addr, scene.dali_scene)]
+                scene.channel,
+                [group_go_to_scene_frame(scene.group_addr, scene.dali_scene)],
             )
         lights = lights or {}
-        short_addrs = scene_short_addrs(scene.members, lights)
-        if not short_addrs:
-            short_addrs = [
-                light.short_addr
-                for light in lights.values()
-                if scene.channel is None or light.channel == scene.channel
-            ]
-        if not short_addrs:
+        targets: list[tuple[int, int]] = []
+        for member_id in scene.members:
+            light = lights.get(member_id)
+            if light is not None:
+                target = (light.channel, light.short_addr)
+            else:
+                parsed = parse_addr_id(member_id)
+                if parsed is None or parsed[1] != "s":
+                    continue
+                target = (parsed[0], parsed[2])
+            if 0 <= target[1] <= SHORT_ADDR_MAX and target not in targets:
+                targets.append(target)
+        if not targets:
             raise ATXLEDApiError("Scene has no member fixtures to recall")
-        commands = [go_to_scene_frame(addr, scene.dali_scene) for addr in short_addrs]
+        channels = {channel for channel, _addr in targets}
+        if len(channels) != 1 or (scene.channel is not None and scene.channel not in channels):
+            raise ATXLEDApiError("Scene members do not share its DALI channel")
+        channel = channels.pop()
+        commands = [go_to_scene_frame(addr, scene.dali_scene) for _channel, addr in targets]
         return await self.async_send_raw(channel, commands)
 
     async def async_set_group_color_temp(
@@ -260,8 +293,7 @@ class ATXLEDClient:
     ) -> None:
         """Set group Kelvin using verified fixture writes.
 
-        Group device POSTs are not assumed to exist on every hub. Write each
-        color-temp member. If the group has no such members, try the group id.
+        Group device POSTs are not verified. Write each known color-temp member.
         """
         targets = [
             member_id
@@ -269,7 +301,6 @@ class ATXLEDClient:
             if member_id in lights and lights[member_id].has_color_temp
         ]
         if not targets:
-            await self.async_set_color_temp_k(group.device_id, kelvin)
-            return
+            raise ATXLEDApiError("Group has no known color-temperature members")
         for device_id in targets:
             await self.async_set_color_temp_k(device_id, kelvin)

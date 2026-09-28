@@ -150,6 +150,35 @@ def _preferred_name(*candidates: object, fallback: str) -> str:
     return fallback
 
 
+def _generic_group_name(name: object, group_addr: int | None) -> bool:
+    if group_addr is None or not isinstance(name, str):
+        return False
+    return bool(
+        re.fullmatch(
+            rf"(?:DALI\s+)?Group\s+{group_addr}", name.strip(), re.IGNORECASE
+        )
+    )
+
+
+def _preferred_group_name(
+    hue_name: object,
+    dev_name: object,
+    address_name: object,
+    *,
+    group_addr: int | None,
+    fallback: str,
+) -> str:
+    """Use a commissioned label before the hub's generated Group N label."""
+    for candidate in (hue_name, dev_name, address_name):
+        if (
+            isinstance(candidate, str)
+            and candidate.strip()
+            and not _generic_group_name(candidate, group_addr)
+        ):
+            return candidate.strip()
+    return _preferred_name(hue_name, dev_name, address_name, fallback=fallback)
+
+
 def parse_device(device_id: str, raw: dict) -> LightDevice | None:
     if not isinstance(raw, dict):
         return None
@@ -311,8 +340,9 @@ def parse_group(
             group_addr = _as_optional_int(address[2]) if group_addr is None else group_addr
         if group_addr is None:
             group_addr = _as_optional_int(raw.get("short_addr") or raw.get("group_addr"))
-        name = _preferred_name(
-            raw.get("hue_name"), raw.get("dev_name"), name_fallback, fallback=device_id
+        name = _preferred_group_name(
+            raw.get("hue_name"), raw.get("dev_name"), name_fallback,
+            group_addr=group_addr, fallback=device_id,
         )
         is_on_raw = raw.get("dev_on")
         is_on = None if is_on_raw is None else bool(is_on_raw)
@@ -503,9 +533,9 @@ def parse_scene(scene_id: str, raw: dict | None, name_fallback: str | None = Non
                     group_addr = parsed_group
                     break
         members = (
-            _member_ids(raw.get("members"))
-            or _member_ids(raw.get("lights"))
-            or _member_ids(raw.get("devices"))
+            _member_ids(raw.get("members"), channel or 0)
+            or _member_ids(raw.get("lights"), channel or 0)
+            or _member_ids(raw.get("devices"), channel or 0)
         )
     if dali_scene is not None and not 0 <= dali_scene <= SCENE_MAX:
         dali_scene = None
@@ -710,10 +740,11 @@ def apply_group_patch(group: GroupDevice, data: dict) -> GroupDevice:
     if "level" in data:
         updates["stored_level"] = _as_optional_int(data["level"])
         updates["state_source"] = "hub"
-    if "dev_name" in data and data["dev_name"] not in (None, ""):
-        updates["name"] = str(data["dev_name"]).strip()
-    if data.get("hue_name") not in (None, ""):
-        updates["name"] = str(data["hue_name"]).strip()
+    if data.get("dev_name") or data.get("hue_name"):
+        updates["name"] = _preferred_group_name(
+            data.get("hue_name"), data.get("dev_name"), group.name,
+            group_addr=group.group_addr, fallback=group.name,
+        )
     if "color_temp_k" in data:
         updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
     members = (
@@ -885,10 +916,30 @@ def merge_group_records(devices: dict, groups_payload: object) -> dict:
     for key, raw in groups_payload.items():
         if str(key) in {"ok", "Groups", "groups"}:
             continue
-        if not isinstance(raw, dict) or key in merged:
+        if not isinstance(raw, dict):
             continue
-        merged[key] = raw
-        changed = True
+        existing = merged.get(key)
+        if isinstance(existing, dict):
+            combined = dict(existing)
+            parsed = parse_addr_id(str(key))
+            group_addr = parsed[2] if parsed else None
+            for field, value in raw.items():
+                if value is None or (field in {"hue_name", "dev_name"} and value == ""):
+                    continue
+                if (
+                    field == "dev_name"
+                    and existing.get("dev_name")
+                    and _generic_group_name(value, group_addr)
+                    and not _generic_group_name(existing["dev_name"], group_addr)
+                ):
+                    continue
+                combined[field] = value
+            if combined != existing:
+                merged[key] = combined
+                changed = True
+        elif key not in merged:
+            merged[key] = raw
+            changed = True
     nested = groups_payload.get("Groups") or groups_payload.get("groups")
     if isinstance(nested, dict):
         extra = merge_group_records(merged, nested)
@@ -925,4 +976,3 @@ def preserve_group_live_state(
             updates["members"] = old.members
         merged[device_id] = replace(group, **updates) if updates else group
     return merged
-
