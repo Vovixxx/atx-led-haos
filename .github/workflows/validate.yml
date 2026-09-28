@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install test dependencies
-        run: python -m pip install pytest pytest-asyncio aiohttp ruff
+        run: python -m pip install pytest pytest-asyncio aiohttp ruff==0.14.6
       - name: Lint Python
         run: ruff check custom_components tests
       - name: Run tests

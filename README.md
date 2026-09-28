@@ -42,7 +42,7 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/pip install pytest pytest-asyncio aiohttp ruff
+.venv/bin/pip install pytest pytest-asyncio aiohttp ruff==0.14.6
 .venv/bin/ruff check custom_components tests
 .venv/bin/pytest tests -q
 ```
