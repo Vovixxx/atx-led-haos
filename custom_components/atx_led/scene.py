@@ -61,7 +61,7 @@ def async_add_new_scenes(
 
 
 class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
-    """A named hub scene recalled with individual or group GO TO SCENE."""
+    """A named hub scene or numbered DALI scene."""
 
     _attr_has_entity_name = True
 
@@ -84,11 +84,16 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
         return (
             super().available
             and scene is not None
-            and scene.dali_scene is not None
             and (
-                scene.channel is not None
-                if scene.group_addr is not None
-                else bool(scene.members)
+                scene.hub_scene_id is not None
+                or (
+                    scene.dali_scene is not None
+                    and (
+                        scene.channel is not None
+                        if scene.group_addr is not None
+                        else bool(scene.members)
+                    )
+                )
             )
         )
 
@@ -97,7 +102,11 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
         scene = self._scene
         if scene is None:
             return {}
-        attrs: dict[str, Any] = {ATTR_DALI_SCENE: scene.dali_scene}
+        attrs: dict[str, Any] = {}
+        if scene.hub_scene_id is not None:
+            attrs["hub_scene_id"] = scene.hub_scene_id
+        if scene.dali_scene is not None:
+            attrs[ATTR_DALI_SCENE] = scene.dali_scene
         if scene.channel is not None:
             attrs[ATTR_DALI_CHANNEL] = scene.channel
         if scene.group_addr is not None:
@@ -108,7 +117,7 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
 
     async def async_activate(self, **kwargs: Any) -> None:
         scene = self._scene
-        if scene is None or scene.dali_scene is None:
+        if scene is None or (scene.hub_scene_id is None and scene.dali_scene is None):
             raise HomeAssistantError("Scene is unavailable")
         lights = self.coordinator.data.lights if self.coordinator.data else {}
         try:

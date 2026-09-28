@@ -57,6 +57,7 @@ async def async_get_config_entry_diagnostics(
                 "name": scene.name,
                 "channel": scene.channel,
                 "dali_scene": scene.dali_scene,
+                "hub_scene_id": scene.hub_scene_id,
                 "group_addr": scene.group_addr,
                 "member_count": len(scene.members),
             }

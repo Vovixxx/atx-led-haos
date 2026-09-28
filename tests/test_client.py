@@ -244,6 +244,48 @@ async def test_recall_scene_prefers_group_go_to_scene(scenes_payload: dict) -> N
     assert kwargs["json"] == {"channel": 0, "commands": ["h8311"]}
 
 
+async def test_hub_scene_uses_trigger_endpoint() -> None:
+    scene = parse_scenes(
+        {"1": {"id": 1, "name": "Test Scene", "state": {"0_s_11": {"level": 133}}}}
+    )[0]
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/scenes/1/trigger"): FakeResponse(
+                200, {"ok": True}
+            )
+        }
+    )
+    await _client(session).async_recall_scene(scene)
+    assert session.calls == [
+        ("POST", "http://192.168.1.50/dali/api/scenes/1/trigger", {})
+    ]
+
+
+async def test_hub_scene_rejection_is_reported() -> None:
+    scene = parse_scenes({"1": {"id": 1, "state": {}}})[0]
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/scenes/1/trigger"): FakeResponse(
+                200, {"ok": False}
+            )
+        }
+    )
+    with pytest.raises(ATXLEDApiError, match="rejected the scene"):
+        await _client(session).async_recall_scene(scene)
+
+
+async def test_hub_scene_accepts_empty_success_response() -> None:
+    scene = parse_scenes({"1": {"id": 1, "state": {}}})[0]
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/scenes/1/trigger"): FakeResponse(
+                204, "", text=""
+            )
+        }
+    )
+    assert await _client(session).async_recall_scene(scene) == {}
+
+
 async def test_scene_without_explicit_targets_does_not_recall_every_light(
     addresses_payload: dict, devices_payload: dict
 ) -> None:

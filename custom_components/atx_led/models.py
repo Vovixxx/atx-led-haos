@@ -89,6 +89,7 @@ class SceneDevice:
     dali_scene: int | None
     group_addr: int | None
     members: tuple[str, ...]
+    hub_scene_id: str | None = None
 
     @property
     def unique_suffix(self) -> str:
@@ -519,6 +520,32 @@ def parse_scene(scene_id: str, raw: dict | None, name_fallback: str | None = Non
     name = str(name_fallback or scene_id).strip() or scene_id
     if isinstance(raw, dict):
         name = str(raw.get("dev_name") or raw.get("name") or raw.get("value") or name).strip()
+        state = raw.get("state")
+        if isinstance(state, dict):
+            raw_hub_id = raw.get("id", scene_id)
+            try:
+                parsed_hub_id = int(raw_hub_id)
+                hub_scene_id = str(parsed_hub_id) if parsed_hub_id >= 0 else None
+            except (TypeError, ValueError):
+                hub_scene_id = None
+            members = tuple(
+                str(member_id)
+                for member_id, member_state in state.items()
+                if isinstance(member_state, dict)
+                and (parsed := parse_addr_id(str(member_id))) is not None
+                and parsed[1] == "s"
+                and 0 <= parsed[2] <= SHORT_ADDR_MAX
+            )
+            channels = {parse_addr_id(member_id)[0] for member_id in members}
+            return SceneDevice(
+                scene_id=str(scene_id),
+                name=name,
+                channel=next(iter(channels)) if len(channels) == 1 else None,
+                dali_scene=None,
+                group_addr=None,
+                members=members,
+                hub_scene_id=hub_scene_id,
+            )
         channel = _as_optional_int(raw.get("channel")) if raw.get("channel") is not None else channel
         for key in ("scene", "scene_number", "dali_scene", "number"):
             if key in raw:

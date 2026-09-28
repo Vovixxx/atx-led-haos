@@ -79,7 +79,9 @@ class ATXLEDClient:
             return None
         return aiohttp.BasicAuth(self._username, self._password or "")
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(
+        self, method: str, path: str, *, allow_empty_response: bool = False, **kwargs: Any
+    ) -> Any:
         url = f"{self.base_url}{path}"
         request_kwargs = dict(kwargs)
         auth = self._auth()
@@ -94,13 +96,19 @@ class ATXLEDClient:
                     if response.status >= 400:
                         body = await response.text()
                         raise ATXLEDApiError(f"HTTP {response.status}: {body[:200]}")
+                    if allow_empty_response and response.status == 204:
+                        return {}
                     try:
                         return await response.json()
                     except json.JSONDecodeError as err:
+                        if allow_empty_response and not (await response.text()).strip():
+                            return {}
                         raise ATXLEDApiError("Hub returned non-JSON") from err
                     except TimeoutError:
                         raise
                     except Exception as err:
+                        if allow_empty_response and not (await response.text()).strip():
+                            return {}
                         raise ATXLEDApiError("Hub returned an unusable body") from err
         except ATXLEDError:
             raise
@@ -248,12 +256,28 @@ class ATXLEDClient:
         self,
         scene: SceneDevice,
         lights: dict[str, LightDevice] | None = None,
-    ) -> SendRawResult:
-        """Recall a DALI scene without broadcast.
+    ) -> Any:
+        """Trigger a saved hub scene or recall a numbered DALI scene.
 
-        Recall only listed groups or members. Virtual/hub-only scenes without
-        a DALI number or an unambiguous channel fail.
+        Numbered DALI scenes recall only listed groups or members. Never infer
+        a DALI slot number from a hub snapshot's numeric identifier.
         """
+        if scene.hub_scene_id is not None:
+            try:
+                hub_scene_id = int(scene.hub_scene_id)
+            except ValueError as err:
+                raise ATXLEDApiError("Scene has an invalid hub identifier") from err
+            if hub_scene_id < 0:
+                raise ATXLEDApiError("Scene has an invalid hub identifier")
+            async with self._lock:
+                payload = await self._request(
+                    "post",
+                    f"/dali/api/scenes/{hub_scene_id}/trigger",
+                    allow_empty_response=True,
+                )
+                if isinstance(payload, dict) and payload.get("ok") is False:
+                    raise ATXLEDApiError("Hub rejected the scene trigger")
+                return payload
         if scene.dali_scene is None:
             raise ATXLEDApiError("Scene has no DALI scene number")
         if scene.group_addr is not None:
