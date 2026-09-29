@@ -68,6 +68,8 @@ class GroupDevice:
     members: tuple[str, ...]
     available: bool = True
     state_source: str = "unknown"
+    members_explicit: bool = False
+    color_temp_source: str = "unknown"
 
     @property
     def unique_suffix(self) -> str:
@@ -316,6 +318,17 @@ def _member_ids(value: object, channel: int = 0) -> tuple[str, ...]:
     return ()
 
 
+_GROUP_MEMBER_FIELDS = ("members", "lights", "devices", "device_ids")
+
+
+def _group_members(raw: dict, channel: int) -> tuple[tuple[str, ...], bool]:
+    """Distinguish an omitted member list from an explicit empty list."""
+    for field in _GROUP_MEMBER_FIELDS:
+        if field in raw and raw[field] is not None:
+            return _member_ids(raw[field], channel), True
+    return (), False
+
+
 def parse_group(
     device_id: str,
     raw: dict | None,
@@ -347,12 +360,7 @@ def parse_group(
         )
         is_on_raw = raw.get("dev_on")
         is_on = None if is_on_raw is None else bool(is_on_raw)
-        members = (
-            _member_ids(raw.get("members"), channel)
-            or _member_ids(raw.get("lights"), channel)
-            or _member_ids(raw.get("devices"), channel)
-            or _member_ids(raw.get("device_ids"), channel)
-        )
+        members, members_explicit = _group_members(raw, channel)
         stored_level = _as_optional_int(raw.get("level"))
         return GroupDevice(
             device_id=device_id,
@@ -369,6 +377,8 @@ def parse_group(
             user_warm=_as_optional_int(raw.get("user_warm")),
             user_cool=_as_optional_int(raw.get("user_cool")),
             members=members,
+            members_explicit=members_explicit,
+            color_temp_source="hub" if raw.get("color_temp_k") is not None else "unknown",
             state_source="hub" if is_on is not None or stored_level is not None else "unknown",
         )
     if group_addr is None:
@@ -405,7 +415,7 @@ def _infer_group_members(
     updated: list[GroupDevice] = []
     changed = False
     for group in groups:
-        if group.members or not group.is_dali_group:
+        if group.members or group.members_explicit or not group.is_dali_group:
             updated.append(group)
             continue
         inferred = tuple(by_group.get((group.channel, group.group_addr), ()))
@@ -578,6 +588,21 @@ def parse_scene(scene_id: str, raw: dict | None, name_fallback: str | None = Non
     )
 
 
+def _list_scene_id(value: object) -> str | None:
+    """Keep legacy string IDs while accepting non-negative numeric zero."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value) if value >= 0 else None
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdecimal():
+            return str(int(value))
+        if value and not value.startswith("-"):
+            return value
+    return None
+
+
 def parse_scenes(payload: object) -> list[SceneDevice]:
     """Decode GET /dali/api/scenes in the shapes observed from hub-style APIs."""
     if isinstance(payload, (bytes, bytearray)):
@@ -606,12 +631,17 @@ def parse_scenes(payload: object) -> list[SceneDevice]:
         for index, item in enumerate(payload):
             if isinstance(item, dict) and item.get("key"):
                 items.append((str(item["key"]), item, str(item.get("value") or item["key"])))
-            elif isinstance(item, dict) and item.get("id"):
-                items.append((str(item["id"]), item, str(item.get("name") or item["id"])))
+            elif isinstance(item, dict) and (
+                scene_id := _list_scene_id(item.get("id"))
+            ) is not None:
+                items.append((scene_id, item, str(item.get("name") or scene_id)))
             elif isinstance(item, str) and item:
                 items.append((item, None, item))
             elif isinstance(item, dict):
-                items.append((str(item.get("dev_name") or item.get("name") or index), item, None))
+                # Prevent a numeric fallback name or index from becoming a
+                # callable hub scene ID when the record has no valid ID.
+                raw = {**item, "id": None}
+                items.append((str(item.get("dev_name") or item.get("name") or index), raw, None))
     scenes: list[SceneDevice] = []
     seen: set[str] = set()
     for scene_id, raw, name_fallback in items:
@@ -774,14 +804,13 @@ def apply_group_patch(group: GroupDevice, data: dict) -> GroupDevice:
         )
     if "color_temp_k" in data:
         updates["color_temp_k"] = _as_optional_int(data["color_temp_k"])
-    members = (
-        _member_ids(data.get("members"), group.channel)
-        or _member_ids(data.get("lights"), group.channel)
-        or _member_ids(data.get("devices"), group.channel)
-        or _member_ids(data.get("device_ids"), group.channel)
-    )
-    if members:
+        updates["color_temp_source"] = (
+            "hub" if updates["color_temp_k"] is not None else "unknown"
+        )
+    members, members_explicit = _group_members(data, group.channel)
+    if members_explicit:
         updates["members"] = members
+        updates["members_explicit"] = True
     if not updates:
         return group
     return replace(group, **updates)
@@ -826,7 +855,7 @@ def derive_group_state(
 ) -> GroupDevice:
     """Fill missing group on/level/CCT from member fixtures. Hub on/level win."""
     members = [lights[member_id] for member_id in group.members if member_id in lights]
-    if not members and group.is_dali_group:
+    if not members and group.is_dali_group and not group.members_explicit:
         members = [
             light
             for light in lights.values()
@@ -840,8 +869,9 @@ def derive_group_state(
     if any_on:
         if group.is_on is not True:
             updates["is_on"] = True
-            if group.state_source != "hub":
-                updates["state_source"] = "derived"
+            # A member can supersede a stale hub-off report. Keep its
+            # provenance so a later all-members-off update can turn it off.
+            updates["state_source"] = "derived"
         on_levels = [
             light.stored_level
             for light in members
@@ -891,12 +921,18 @@ def _derive_group_color_temp(
     updates: dict[str, object] = {}
     if not group.has_color_temp:
         updates["has_color_temp"] = True
-    if group.color_temp_k is None:
+    if group.color_temp_source != "hub":
         kelvin_values = [
             light.color_temp_k for light in cct_members if light.color_temp_k is not None
         ]
         if kelvin_values:
-            updates["color_temp_k"] = kelvin_values[0]
+            if group.color_temp_k != kelvin_values[0]:
+                updates["color_temp_k"] = kelvin_values[0]
+            if group.color_temp_source != "derived":
+                updates["color_temp_source"] = "derived"
+        elif group.color_temp_source == "derived":
+            updates["color_temp_k"] = None
+            updates["color_temp_source"] = "unknown"
     if not group.user_warm or not group.user_cool:
         ranges = [
             color_temp_range_kelvin(light.user_warm, light.user_cool)
@@ -948,6 +984,9 @@ def merge_group_records(devices: dict, groups_payload: object) -> dict:
         existing = merged.get(key)
         if isinstance(existing, dict):
             combined = dict(existing)
+            if any(field in raw and raw[field] is not None for field in _GROUP_MEMBER_FIELDS):
+                for field in _GROUP_MEMBER_FIELDS:
+                    combined.pop(field, None)
             parsed = parse_addr_id(str(key))
             group_addr = parsed[2] if parsed else None
             for field, value in raw.items():
@@ -990,16 +1029,22 @@ def preserve_group_live_state(
         if old.state_source == "hub" and group.state_source != "hub":
             updates["is_on"] = old.is_on
             updates["stored_level"] = old.stored_level
-            updates["color_temp_k"] = old.color_temp_k
             updates["state_source"] = "hub"
         else:
             if group.is_on is None and old.is_on is not None:
                 updates["is_on"] = old.is_on
             if group.stored_level is None and old.stored_level is not None:
                 updates["stored_level"] = old.stored_level
-            if group.color_temp_k is None and old.color_temp_k is not None:
-                updates["color_temp_k"] = old.color_temp_k
-        if not group.members and old.members:
+        if (
+            (old.color_temp_source == "hub" and group.color_temp_source != "hub")
+            or (old.color_temp_source == "derived" and group.color_temp_source == "unknown")
+        ):
+            updates["color_temp_k"] = old.color_temp_k
+            updates["color_temp_source"] = old.color_temp_source
+        if old.members_explicit and not group.members_explicit:
+            updates["members"] = old.members
+            updates["members_explicit"] = True
+        elif not group.members and old.members and not group.members_explicit:
             updates["members"] = old.members
         merged[device_id] = replace(group, **updates) if updates else group
     return merged

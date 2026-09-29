@@ -97,3 +97,39 @@ def test_atx_hub_snapshot_is_not_mistaken_for_dali_scene_slot() -> None:
     assert scenes[0].members == ("0_s_1", "0_s_11")
     assert scenes[0].channel == 0
     assert scenes[0].dali_scene is None
+
+
+def test_list_scene_zero_keeps_identity_across_rename() -> None:
+    state = {"0_s_1": {"dev_on": True, "level": 100}}
+    before = parse_scenes([{"id": 0, "name": "Scene 0", "state": state}])[0]
+    after = parse_scenes([{"id": 0, "name": "Evening", "state": state}])[0]
+
+    assert before.scene_id == after.scene_id == "0"
+    assert before.unique_suffix == after.unique_suffix == "scene_0"
+    assert before.hub_scene_id == after.hub_scene_id == "0"
+    assert after.name == "Evening"
+
+
+def test_list_scene_accepts_other_numeric_ids_and_ignores_invalid_ids() -> None:
+    scenes = parse_scenes([
+        {"id": 2, "name": "Two", "state": {}},
+        {"id": "03", "name": "Three", "state": {}},
+        {"id": -1, "name": "Invalid", "state": {}},
+        {"id": True, "name": "Boolean", "state": {}},
+        {"name": "Missing", "state": {}},
+        {"id": -1, "state": {}},
+        {"name": "123", "state": {}},
+    ])
+    assert [(scene.scene_id, scene.hub_scene_id) for scene in scenes] == [
+        ("2", "2"), ("3", "3"), ("Invalid", None),
+        ("Boolean", None), ("Missing", None), ("5", None), ("123", None),
+    ]
+
+
+def test_list_scene_preserves_named_dali_id() -> None:
+    scene = parse_scenes([{"id": "1_sc_4", "name": "Upstairs", "members": [3]}])[0]
+    assert scene.scene_id == "1_sc_4"
+    assert scene.unique_suffix == "scene_1_sc_4"
+    assert scene.channel == 1
+    assert scene.dali_scene == 4
+    assert scene.members == ("1_s_3",)

@@ -130,7 +130,13 @@ class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._apply_capabilities(self._device)
+        device = self._device
+        self._apply_capabilities(device)
+        if device is not None and self.device_entry is not None:
+            if self.device_entry.name != device.name:
+                self.device_entry = dr.async_get(self.hass).async_update_device(
+                    self.device_entry.id, name=device.name
+                )
         super()._handle_coordinator_update()
 
     @property
@@ -319,9 +325,11 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         try:
             if ATTR_COLOR_TEMP_KELVIN in kwargs and group.has_color_temp:
                 lights = self.coordinator.data.lights if self.coordinator.data else {}
+                kelvin = int(kwargs[ATTR_COLOR_TEMP_KELVIN])
                 await self.coordinator.client.async_set_group_color_temp(
-                    group, lights, int(kwargs[ATTR_COLOR_TEMP_KELVIN])
+                    group, lights, kelvin
                 )
+                self.coordinator.async_group_color_temp_written(group.device_id, kelvin)
             if ATTR_BRIGHTNESS in kwargs:
                 level = ha_brightness_to_dali(
                     int(kwargs[ATTR_BRIGHTNESS]), group.min_level, group.max_level

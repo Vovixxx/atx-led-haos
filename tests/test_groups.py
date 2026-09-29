@@ -101,6 +101,87 @@ def test_group_patch_updates_state_without_dropping_members(
     assert updated["0_v_0"] is groups["0_v_0"]
 
 
+def test_explicit_empty_ws_membership_clears_group_even_with_stale_fixture_flags(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, lights)
+    }
+    assert groups["0_g_1"].members
+    cleared = apply_group_patches(groups, [("0_g_1", {"device_ids": []})])
+    derived = apply_derived_group_states(
+        cleared, {light.device_id: light for light in lights}
+    )
+    assert derived["0_g_1"].members == ()
+    assert derived["0_g_1"].members_explicit is True
+
+
+def test_explicit_empty_http_membership_replaces_old_members(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    old = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, lights)
+    }
+    devices = dict(devices_payload)
+    group_raw = dict(devices["0_g_1"])
+    group_raw["members"] = []
+    devices["0_g_1"] = group_raw
+    discovered = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices, lights)
+    }
+    merged = preserve_group_live_state(old, discovered)
+    assert merged["0_g_1"].members == ()
+    assert merged["0_g_1"].members_explicit is True
+
+
+def test_http_omitted_membership_keeps_prior_explicit_clear(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, lights)
+    }
+    cleared = apply_group_patches(groups, [("0_g_1", {"members": []})])
+    devices = dict(devices_payload)
+    group_raw = dict(devices["0_g_1"])
+    for field in ("members", "lights", "devices", "device_ids"):
+        group_raw.pop(field, None)
+    devices["0_g_1"] = group_raw
+    discovered = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices, lights)
+    }
+    merged = preserve_group_live_state(cleared, discovered)
+    derived = apply_derived_group_states(
+        merged, {light.device_id: light for light in lights}
+    )
+    assert derived["0_g_1"].members == ()
+    assert derived["0_g_1"].members_explicit is True
+
+
+def test_omitted_membership_still_infers_from_fixture_flags(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    devices = dict(devices_payload)
+    group_raw = dict(devices["0_g_1"])
+    for field in ("members", "lights", "devices", "device_ids"):
+        group_raw.pop(field, None)
+    devices["0_g_1"] = group_raw
+    lights = reconcile_lights(addresses_payload, devices)
+    group = next(
+        item for item in reconcile_groups(addresses_payload, devices, lights)
+        if item.device_id == "0_g_1"
+    )
+    assert group.members == ("0_s_1",)
+    assert group.members_explicit is False
+
+
 def test_group_patches_do_not_create_unknown_groups(
     addresses_payload: dict, devices_payload: dict
 ) -> None:
@@ -194,6 +275,13 @@ def test_groups_api_empty_name_does_not_erase_existing_name() -> None:
     devices = {"0_g_5": {"channel": 0, "dev_name": "Kitchen Spots"}}
     merged = merge_group_records(devices, {"0_g_5": {"dev_name": "", "hue_name": None}})
     assert merged["0_g_5"]["dev_name"] == "Kitchen Spots"
+
+
+def test_groups_api_empty_members_override_device_record_members() -> None:
+    devices = {"0_g_5": {"members": ["0_s_21"], "dev_on": False}}
+    merged = merge_group_records(devices, {"0_g_5": {"device_ids": []}})
+    assert merged["0_g_5"].get("members") is None
+    assert merged["0_g_5"]["device_ids"] == []
 
 
 def test_generic_group_patch_keeps_friendly_address_name() -> None:
@@ -331,6 +419,34 @@ def test_member_patch_updates_group_even_when_hub_last_said_off(
     assert updated["0_g_1"].stored_level == 90
 
 
+def test_group_turns_off_after_hub_off_precedes_member_off_updates(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
+    }
+    group_id = "0_g_1"
+    member_ids = groups[group_id].members
+    for member_id in member_ids:
+        lights = apply_device_patches(lights, [(member_id, {"dev_on": True})])
+
+    # The hub reports off before fixture WebSocket messages catch up.
+    groups = apply_group_patches(groups, [(group_id, {"dev_on": False, "level": 0})])
+    assert groups[group_id].state_source == "hub"
+    groups = apply_derived_group_states(groups, lights)
+    assert groups[group_id].is_on is True
+    assert groups[group_id].state_source == "derived"
+
+    for member_id in member_ids:
+        lights = apply_device_patches(lights, [(member_id, {"dev_on": False})])
+        groups = apply_derived_group_states(groups, lights)
+
+    assert groups[group_id].is_on is False
+    assert groups[group_id].state_source == "derived"
+
+
 def test_group_color_temp_is_derived_from_member_capabilities() -> None:
     addresses = {
         "Groups": [{"key": "0_g_5", "value": "Group 5"}],
@@ -394,6 +510,93 @@ def test_group_color_temp_is_derived_from_member_capabilities() -> None:
     minimum, maximum = color_temp_range_kelvin(group.user_warm, group.user_cool)
     assert minimum is not None and maximum is not None
     assert minimum < maximum
+
+
+def test_derived_group_color_temp_tracks_member_changes() -> None:
+    addresses = {
+        "Groups": [{"key": "0_g_5", "value": "Group 5"}],
+        "Lights": [{"key": "0_s_21", "value": "Spot 21"}],
+    }
+    devices = {
+        "0_s_21": {
+            "channel": 0, "short_addr": 21, "dev_name": "Spot 21",
+            "groups": [5], "has_color_temp": True,
+            "color_temp_k": 3000,
+        },
+    }
+    lights = {light.device_id: light for light in reconcile_lights(addresses, devices)}
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses, devices, list(lights.values()))
+    }
+    assert groups["0_g_5"].color_temp_k == 3000
+    assert groups["0_g_5"].color_temp_source == "derived"
+
+    lights = apply_device_patches(lights, [("0_s_21", {"color_temp_k": 5000})])
+    updated = apply_derived_group_states(groups, lights)
+    assert updated["0_g_5"].color_temp_k == 5000
+    assert updated["0_g_5"].color_temp_source == "derived"
+
+
+def test_hub_group_color_temp_stays_authoritative_on_member_update(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
+    }
+    groups = apply_group_patches(groups, [("0_g_1", {"color_temp_k": 4000})])
+    lights = apply_device_patches(lights, [("0_s_1", {"color_temp_k": 5000})])
+    updated = apply_derived_group_states(groups, lights)
+    assert updated["0_g_1"].color_temp_k == 4000
+    assert updated["0_g_1"].color_temp_source == "hub"
+
+
+def test_http_poll_without_group_color_temp_keeps_ws_hub_value(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    groups = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices_payload, lights)
+    }
+    groups = apply_group_patches(groups, [("0_g_1", {"color_temp_k": 4200})])
+    devices = dict(devices_payload)
+    group_raw = dict(devices["0_g_1"])
+    group_raw.pop("color_temp_k", None)
+    devices["0_g_1"] = group_raw
+    discovered = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices, lights)
+    }
+    merged = preserve_group_live_state(groups, discovered)
+    assert merged["0_g_1"].color_temp_k == 4200
+    assert merged["0_g_1"].color_temp_source == "hub"
+
+
+def test_http_hub_color_temp_replaces_derived_member_value(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    lights = reconcile_lights(addresses_payload, devices_payload)
+    devices = dict(devices_payload)
+    group_raw = dict(devices["0_g_1"])
+    group_raw.pop("color_temp_k", None)
+    devices["0_g_1"] = group_raw
+    derived = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, devices, lights)
+    }
+    assert derived["0_g_1"].color_temp_source == "derived"
+    hub_devices = dict(devices_payload)
+    hub_devices["0_g_1"] = {**devices_payload["0_g_1"], "color_temp_k": 4200}
+    hub = {
+        group.device_id: group
+        for group in reconcile_groups(addresses_payload, hub_devices, lights)
+    }
+    merged = preserve_group_live_state(derived, hub)
+    assert merged["0_g_1"].color_temp_k == hub["0_g_1"].color_temp_k
+    assert merged["0_g_1"].color_temp_source == "hub"
 
 
 def test_virtual_group_does_not_reuse_dali_group_record() -> None:

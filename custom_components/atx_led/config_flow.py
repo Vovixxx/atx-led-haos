@@ -131,12 +131,14 @@ class ATXLEDConfigFlow(ConfigFlow, domain=DOMAIN):
             except ATXLEDApiError:
                 errors["base"] = "invalid_response"
             else:
-                data_updates: dict[str, Any] = {CONF_HOST: normalized_host}
+                data = {**entry.data, CONF_HOST: normalized_host}
+                data.pop(CONF_USERNAME, None)
+                data.pop(CONF_PASSWORD, None)
                 if username:
-                    data_updates[CONF_USERNAME] = username
-                    data_updates[CONF_PASSWORD] = password or ""
-                return self.async_update_reload_and_abort(
-                    entry, data_updates=data_updates
+                    data[CONF_USERNAME] = username
+                    data[CONF_PASSWORD] = password or ""
+                return self.async_update_and_abort(
+                    entry, data=data
                 )
 
         return self.async_show_form(

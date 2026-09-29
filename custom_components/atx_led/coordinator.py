@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -85,6 +85,18 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
         if self.data is None:
             return None
         return self.data.scenes.get(scene_id)
+
+    def async_group_color_temp_written(self, device_id: str, kelvin: int) -> None:
+        """Reflect successful fixture writes until the hub reports its own value."""
+        if self.data is None or device_id not in self.data.groups:
+            return
+        groups = dict(self.data.groups)
+        groups[device_id] = replace(
+            groups[device_id], color_temp_k=kelvin, color_temp_source="derived"
+        )
+        self._publish_ws_data(
+            ATXLEDData(lights=self.data.lights, groups=groups, scenes=self.data.scenes)
+        )
 
     def async_start_watch(self) -> None:
         """Listen for hub push updates. Does not send light-changing commands."""
@@ -173,7 +185,7 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             groups = apply_derived_group_states(groups, self.data.lights)
             if groups is self.data.groups:
                 return
-            self.async_set_updated_data(
+            self._publish_ws_data(
                 ATXLEDData(
                     lights=self.data.lights, groups=groups, scenes=self.data.scenes
                 )
@@ -183,9 +195,14 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
         groups = apply_derived_group_states(self.data.groups, lights)
         if lights is self.data.lights and groups is self.data.groups:
             return
-        self.async_set_updated_data(
+        self._publish_ws_data(
             ATXLEDData(lights=lights, groups=groups, scenes=self.data.scenes)
         )
+
+    def _publish_ws_data(self, data: ATXLEDData) -> None:
+        """Notify entities of push data without postponing inventory polling."""
+        self.data = data
+        self.async_update_listeners()
 
     async def _async_update_data(self) -> ATXLEDData:
         try:

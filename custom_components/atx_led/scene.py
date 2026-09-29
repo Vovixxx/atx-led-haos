@@ -78,6 +78,13 @@ class ATXLEDScene(CoordinatorEntity[ATXLEDCoordinator], Scene):
     def _scene(self) -> SceneDevice | None:
         return self.coordinator.get_scene(self.scene_id)
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        scene = self._scene
+        if scene is not None:
+            self._attr_name = scene.name
+        super()._handle_coordinator_update()
+
     @property
     def available(self) -> bool:
         scene = self._scene
