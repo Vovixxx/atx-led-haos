@@ -29,6 +29,7 @@ from .protocol import (
 )
 
 DEFAULT_TIMEOUT = 10.0
+WS_RECEIVE_TIMEOUT = 120.0
 
 
 class ATXLEDError(Exception):
@@ -204,8 +205,17 @@ class ATXLEDClient:
         return f"ws://{self.host}/ws/dali/groups"
 
     async def _async_open_socket(self, url: str) -> Any:
-        """Open a push socket. Do not send frames; listen only."""
-        request_kwargs: dict[str, Any] = {"heartbeat": 30.0}
+        """Open a push socket. Do not send frames; listen only.
+
+        The hub never answers client PINGs, so a client heartbeat drops the socket
+        every ~80 s. It sends its own PING every 50 s instead; aiohttp answers it,
+        and 120 s of silence means the socket is dead.
+        """
+        import aiohttp
+
+        request_kwargs: dict[str, Any] = {
+            "timeout": aiohttp.ClientWSTimeout(ws_receive=WS_RECEIVE_TIMEOUT)
+        }
         auth = self._auth()
         if auth is not None:
             request_kwargs["auth"] = auth

@@ -191,6 +191,25 @@ def test_devices_websocket_url_is_verified_path() -> None:
     assert client.websocket_groups_url == "ws://192.168.1.50/ws/dali/groups"
 
 
+async def test_push_socket_answers_hub_pings_without_client_heartbeat() -> None:
+    """The hub never answers client PINGs; it sends its own every 50 s."""
+    import aiohttp
+
+    opened: list[tuple[str, dict[str, Any]]] = []
+
+    class WsSession(FakeSession):
+        async def ws_connect(self, url: str, **kwargs: Any) -> str:
+            opened.append((url, kwargs))
+            return "socket"
+
+    client = ATXLEDClient(host="192.168.1.50", session=WsSession({}))
+    assert await client.async_open_groups_socket() == "socket"
+    _url, kwargs = opened[0]
+    assert kwargs.get("heartbeat") is None
+    assert kwargs.get("autoping", True) is True
+    assert kwargs["timeout"] == aiohttp.ClientWSTimeout(ws_receive=120.0)
+
+
 async def test_set_group_level_uses_group_dapc() -> None:
     session = FakeSession(
         {
