@@ -538,7 +538,7 @@ def test_derived_group_color_temp_tracks_member_changes() -> None:
     assert updated["0_g_5"].color_temp_source == "derived"
 
 
-def test_hub_group_color_temp_stays_authoritative_on_member_update(
+def test_member_color_temp_replaces_stale_hub_group_value(
     addresses_payload: dict, devices_payload: dict
 ) -> None:
     lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
@@ -549,8 +549,57 @@ def test_hub_group_color_temp_stays_authoritative_on_member_update(
     groups = apply_group_patches(groups, [("0_g_1", {"color_temp_k": 4000})])
     lights = apply_device_patches(lights, [("0_s_1", {"color_temp_k": 5000})])
     updated = apply_derived_group_states(groups, lights)
-    assert updated["0_g_1"].color_temp_k == 4000
-    assert updated["0_g_1"].color_temp_source == "hub"
+    assert updated["0_g_1"].color_temp_k == 5000
+    assert updated["0_g_1"].color_temp_source == "derived"
+
+
+def _kitchen_payloads(kelvins: tuple[int, int]) -> tuple[dict, dict]:
+    addresses = {
+        "Groups": [{"key": "0_g_5", "value": "Group 5"}],
+        "Lights": [
+            {"key": "0_s_21", "value": "Spot 21"},
+            {"key": "0_s_22", "value": "Spot 22"},
+        ],
+        "Virtual Groups": [],
+    }
+    devices = {
+        f"0_s_{addr}": {
+            "channel": 0, "short_addr": addr, "dev_name": f"Spot {addr}",
+            "groups": [5], "has_color_temp": True, "color_temp_k": kelvin,
+            "user_warm": 370, "user_cool": 200,
+        }
+        for addr, kelvin in zip((21, 22), kelvins)
+    }
+    devices["0_g_5"] = {
+        "address": [0, "group", 5], "channel": 0, "dev_name": "Group 5",
+        "color_temp_k": 4000, "dev_on": True, "level": 226, "device_ids": [21, 22],
+    }
+    return addresses, devices
+
+
+def test_hub_poll_does_not_override_agreeing_members() -> None:
+    """Per-member writes never update the hub group record; members are the truth."""
+    addresses, devices = _kitchen_payloads((2703, 2703))
+    lights = {light.device_id: light for light in reconcile_lights(addresses, devices)}
+    previous = {
+        group.device_id: group
+        for group in reconcile_groups(addresses, devices, list(lights.values()))
+    }
+    discovered = {
+        group.device_id: group
+        for group in reconcile_groups(addresses, devices, list(lights.values()))
+    }
+    merged = apply_derived_group_states(preserve_group_live_state(previous, discovered), lights)
+    assert merged["0_g_5"].color_temp_k == 2703
+    assert merged["0_g_5"].color_temp_source == "derived"
+
+
+def test_hub_group_color_temp_kept_when_members_disagree() -> None:
+    addresses, devices = _kitchen_payloads((2703, 3000))
+    lights = reconcile_lights(addresses, devices)
+    group = reconcile_groups(addresses, devices, lights)[0]
+    assert group.color_temp_k == 4000
+    assert group.color_temp_source == "hub"
 
 
 def test_http_poll_without_group_color_temp_keeps_ws_hub_value(
@@ -575,28 +624,24 @@ def test_http_poll_without_group_color_temp_keeps_ws_hub_value(
     assert merged["0_g_1"].color_temp_source == "hub"
 
 
-def test_http_hub_color_temp_replaces_derived_member_value(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    lights = reconcile_lights(addresses_payload, devices_payload)
-    devices = dict(devices_payload)
-    group_raw = dict(devices["0_g_1"])
-    group_raw.pop("color_temp_k", None)
-    devices["0_g_1"] = group_raw
+def test_http_hub_color_temp_replaces_derived_member_value() -> None:
+    addresses, devices = _kitchen_payloads((2703, 3000))
+    lights = reconcile_lights(addresses, devices)
+    no_hub = dict(devices)
+    no_hub["0_g_5"] = {k: v for k, v in devices["0_g_5"].items() if k != "color_temp_k"}
     derived = {
-        group.device_id: group
-        for group in reconcile_groups(addresses_payload, devices, lights)
+        group.device_id: group for group in reconcile_groups(addresses, no_hub, lights)
     }
-    assert derived["0_g_1"].color_temp_source == "derived"
-    hub_devices = dict(devices_payload)
-    hub_devices["0_g_1"] = {**devices_payload["0_g_1"], "color_temp_k": 4200}
+    assert derived["0_g_5"].color_temp_source == "derived"
+    hub_devices = dict(devices)
+    hub_devices["0_g_5"] = {**devices["0_g_5"], "color_temp_k": 4200}
     hub = {
         group.device_id: group
-        for group in reconcile_groups(addresses_payload, hub_devices, lights)
+        for group in reconcile_groups(addresses, hub_devices, lights)
     }
     merged = preserve_group_live_state(derived, hub)
-    assert merged["0_g_1"].color_temp_k == hub["0_g_1"].color_temp_k
-    assert merged["0_g_1"].color_temp_source == "hub"
+    assert merged["0_g_5"].color_temp_k == 4200
+    assert merged["0_g_5"].color_temp_source == "hub"
 
 
 def test_virtual_group_does_not_reuse_dali_group_record() -> None:

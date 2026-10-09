@@ -32,7 +32,7 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 - DALI group on/off uses group DAPC (`group * 2 + 0x80`). Virtual groups use the hub device `level` write.
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
 - Brightness changes while a fixture is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply. DALI groups keep using group DAPC.
-- Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Groups expose Kelvin when known member fixtures support it; writes go to those members.
+- Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Groups expose Kelvin when known member fixtures support it; writes go to those members. The group reports its members' Kelvin when they all agree, because the hub group record does not track member writes.
 - Leftover drivers the hub cannot characterize (empty type, zero serial/firmware) stay dimmers until you open **Configure** on the integration, pick a mode, and set min/max dim and Kelvin by sight. Those values stay in Home Assistant and are not written to the hub.
 - Saved hub scenes from `/dali/api/scenes` activate through `POST /dali/api/scenes/{id}/trigger`. Explicitly numbered DALI scenes use GO TO SCENE for their listed group or member fixtures.
 - State updates immediately from `/ws/dali/devices` and `/ws/dali/groups` when the hub reports a change. HTTP inventory (`addresses`, `devices`, best-effort `groups` and `scenes`) is still polled every 15 seconds as a backup. Failed reads become unavailable, not off.

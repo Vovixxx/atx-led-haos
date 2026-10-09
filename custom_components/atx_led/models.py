@@ -914,6 +914,9 @@ def _derive_group_color_temp(
     Hub group records often store ``color_temp_k`` without ``has_color_temp``.
     Slider bounds are the intersection of member user ranges so the same
     Kelvin is valid on every color-temp fixture in the group.
+
+    Group Kelvin writes go to each member, so the hub group record goes stale.
+    When every color-temp member reports the same Kelvin, that value wins.
     """
     cct_members = [light for light in members if light.has_color_temp]
     if not cct_members:
@@ -921,10 +924,11 @@ def _derive_group_color_temp(
     updates: dict[str, object] = {}
     if not group.has_color_temp:
         updates["has_color_temp"] = True
-    if group.color_temp_source != "hub":
-        kelvin_values = [
-            light.color_temp_k for light in cct_members if light.color_temp_k is not None
-        ]
+    kelvin_values = [
+        light.color_temp_k for light in cct_members if light.color_temp_k is not None
+    ]
+    members_agree = len(kelvin_values) == len(cct_members) and len(set(kelvin_values)) == 1
+    if group.color_temp_source != "hub" or members_agree:
         if kelvin_values:
             if group.color_temp_k != kelvin_values[0]:
                 updates["color_temp_k"] = kelvin_values[0]
