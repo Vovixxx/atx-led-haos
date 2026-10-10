@@ -323,13 +323,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         if group is None:
             raise HomeAssistantError("Group is unavailable")
         try:
-            if ATTR_COLOR_TEMP_KELVIN in kwargs and group.has_color_temp:
-                lights = self.coordinator.data.lights if self.coordinator.data else {}
-                kelvin = int(kwargs[ATTR_COLOR_TEMP_KELVIN])
-                await self.coordinator.client.async_set_group_color_temp(
-                    group, lights, kelvin
-                )
-                self.coordinator.async_group_color_temp_written(group.device_id, kelvin)
+            # Send the level first: member Kelvin writes are serial and slow.
             if ATTR_BRIGHTNESS in kwargs:
                 level = ha_brightness_to_dali(
                     int(kwargs[ATTR_BRIGHTNESS]), group.min_level, group.max_level
@@ -337,6 +331,13 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 await self._async_set_level(group, level)
             elif not group.is_on:
                 await self._async_set_level(group, _restore_level(group))
+            if ATTR_COLOR_TEMP_KELVIN in kwargs and group.has_color_temp:
+                lights = self.coordinator.data.lights if self.coordinator.data else {}
+                kelvin = int(kwargs[ATTR_COLOR_TEMP_KELVIN])
+                await self.coordinator.client.async_set_group_color_temp(
+                    group, lights, kelvin
+                )
+                self.coordinator.async_group_color_temp_written(group.device_id, kelvin)
         except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

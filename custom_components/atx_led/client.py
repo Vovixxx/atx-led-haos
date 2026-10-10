@@ -327,7 +327,8 @@ class ATXLEDClient:
     ) -> None:
         """Set group Kelvin using verified fixture writes.
 
-        Group device POSTs are not verified. Write each known color-temp member.
+        Group device POSTs are not verified. Write each known color-temp member,
+        skipping members already reported at the target Kelvin.
         """
         targets = [
             member_id
@@ -336,5 +337,8 @@ class ATXLEDClient:
         ]
         if not targets:
             raise ATXLEDApiError("Group has no known color-temperature members")
+        kelvin = int(kelvin)
         for device_id in targets:
+            if lights[device_id].color_temp_k == kelvin:
+                continue
             await self.async_set_color_temp_k(device_id, kelvin)

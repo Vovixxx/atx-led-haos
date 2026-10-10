@@ -418,3 +418,44 @@ async def test_group_color_temp_without_known_members_does_not_post_to_group(
     with pytest.raises(ATXLEDApiError, match="no known"):
         await _client(session).async_set_group_color_temp(group, {}, 3000)
     assert session.calls == []
+
+
+def _cct_group_and_lights(addresses_payload: dict, devices_payload: dict):
+    from atx_led.models import reconcile_groups, reconcile_lights
+
+    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
+    group = next(
+        item
+        for item in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
+        if item.device_id == "0_g_1"
+    )
+    group = group.__class__(
+        **{**group.__dict__, "has_color_temp": True, "members": ("0_s_1", "0_s_21")}
+    )
+    return group, lights
+
+
+async def test_group_color_temp_skips_members_already_at_target(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    group, lights = _cct_group_and_lights(addresses_payload, devices_payload)
+    lights["0_s_1"] = lights["0_s_1"].__class__(**{**lights["0_s_1"].__dict__, "color_temp_k": 2702})
+    session = FakeSession({})
+    await _client(session).async_set_group_color_temp(group, lights, 2702)
+    assert session.calls == []
+
+
+async def test_group_color_temp_writes_only_members_off_target(
+    addresses_payload: dict, devices_payload: dict
+) -> None:
+    group, lights = _cct_group_and_lights(addresses_payload, devices_payload)
+    session = FakeSession(
+        {
+            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
+        }
+    )
+    # 0_s_1 reports 4065 K, 0_s_21 already reports 2702 K.
+    await _client(session).async_set_group_color_temp(group, lights, 2702)
+    assert [(url, kwargs["json"]) for _method, url, kwargs in session.calls] == [
+        ("http://192.168.1.50/dali/api/devices/0_s_1", {"color_temp_k": 2702})
+    ]
