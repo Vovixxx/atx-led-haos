@@ -92,6 +92,8 @@ Verified: `POST /dali/api/devices/{id}` with `color_temp_k` sets Kelvin on color
 
 Verified 2026-10-10 on a DALI group (`0_g_15`, three DT8 members): `POST /dali/api/devices/0_g_N` with `color_temp_k` takes one request (~0.4 s), applies the Kelvin to every member the hub lists in the group's `device_ids`, and returns `{"ok": true, "data": [...]}` with the updated member fixture records. The group's own record keeps its old `color_temp_k`. A group with no members returns `{"ok": true, "data": []}`.
 
+Driver readback confirmed it, not just the hub records: DT8 `QUERY COLOUR VALUE` for colour temperature (`["hA302","hC108","h{addr*2+1:02X}FA","h{addr*2+1:02X}98"]`, MSB then DTR0 LSB, in mireds) moved from 370 to 200 on all three members after a 5000 K group write, with the fixtures off. Readings taken within a second can still be mid-fade.
+
 Verified for dimming while on: `POST /dali/api/devices/{id}` with `level` so the hub can apply its configured fade. On/off still uses `send-raw` DAPC.
 
 Observed in web-interface source; not independently used by this integration:
