@@ -325,10 +325,12 @@ class ATXLEDClient:
         lights: dict[str, LightDevice],
         kelvin: int,
     ) -> None:
-        """Set group Kelvin using verified fixture writes.
+        """Set group Kelvin with one group write, then fill in missed members.
 
-        Group device POSTs are not verified. Write each known color-temp member,
-        skipping members already reported at the target Kelvin.
+        The hub fans a group ``color_temp_k`` POST out to its own member list and
+        returns the updated fixture records. Members it did not report at the
+        target Kelvin get a direct fixture write. Members already reported at the
+        target Kelvin are skipped.
         """
         targets = [
             member_id
@@ -338,7 +340,38 @@ class ATXLEDClient:
         if not targets:
             raise ATXLEDApiError("Group has no known color-temperature members")
         kelvin = int(kelvin)
-        for device_id in targets:
-            if lights[device_id].color_temp_k == kelvin:
-                continue
-            await self.async_set_color_temp_k(device_id, kelvin)
+        pending = [
+            device_id for device_id in targets if lights[device_id].color_temp_k != kelvin
+        ]
+        if not pending:
+            return
+        written: set[str] = set()
+        if len(pending) > 1:
+            try:
+                payload = await self.async_set_color_temp_k(group.device_id, kelvin)
+            except ATXLEDApiError:
+                payload = None
+            written = _records_at_kelvin(payload, kelvin)
+        for device_id in pending:
+            if device_id not in written:
+                await self.async_set_color_temp_k(device_id, kelvin)
+
+
+def _records_at_kelvin(payload: Any, kelvin: int) -> set[str]:
+    """Fixture ids a device write response reports at ``kelvin``."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return set()
+    written: set[str] = set()
+    for record in payload["data"]:
+        if not isinstance(record, dict) or record.get("color_temp_k") != kelvin:
+            continue
+        address = record.get("address")
+        if (
+            isinstance(address, list)
+            and len(address) == 3
+            and address[1] == "single"
+            and isinstance(address[0], int)
+            and isinstance(address[2], int)
+        ):
+            written.add(f"{address[0]}_s_{address[2]}")
+    return written

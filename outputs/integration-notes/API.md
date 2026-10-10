@@ -90,6 +90,8 @@ Wrong paths (`/ws/dali/devices/0_s_1`, query strings, trailing slash) drop the c
 
 Verified: `POST /dali/api/devices/{id}` with `color_temp_k` sets Kelvin on color-temperature fixtures.
 
+Verified 2026-10-10 on a DALI group (`0_g_15`, three DT8 members): `POST /dali/api/devices/0_g_N` with `color_temp_k` takes one request (~0.4 s), applies the Kelvin to every member the hub lists in the group's `device_ids`, and returns `{"ok": true, "data": [...]}` with the updated member fixture records. The group's own record keeps its old `color_temp_k`. A group with no members returns `{"ok": true, "data": []}`.
+
 Verified for dimming while on: `POST /dali/api/devices/{id}` with `level` so the hub can apply its configured fade. On/off still uses `send-raw` DAPC.
 
 Observed in web-interface source; not independently used by this integration:
@@ -105,7 +107,7 @@ Display names prefer `hue_name`, then `dev_name`, then the `/dali/api/addresses`
 
 Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead. Do not treat a virtual group id as interchangeable with the DALI group that shares the same numeric index.
 
-Group records are often missing `has_color_temp`. If member fixtures advertise color temperature, the group light exposes Kelvin and writes `color_temp_k` to those members. Hub group `dev_on`/`level` win when present; otherwise on/off is derived from members until `/ws/dali/groups` sends a patch.
+Group records are often missing `has_color_temp`. If member fixtures advertise color temperature, the group light exposes Kelvin. A Kelvin change sends one group write, then writes directly to any color-temperature member the response does not report at the target Kelvin. Members already at the target are skipped. Hub group `dev_on`/`level` win when present; otherwise on/off is derived from members until `/ws/dali/groups` sends a patch.
 
 Do not present remaining untested source-observed endpoints as integration controls.
 
