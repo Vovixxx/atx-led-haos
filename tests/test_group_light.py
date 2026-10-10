@@ -151,3 +151,20 @@ async def test_group_turn_on_brightness_only_writes_no_kelvin(
     entity, calls = _entity(light_module, addresses_payload, devices_payload, is_on=True)
     await entity.async_turn_on(brightness=128)
     assert [call[0] for call in calls] == ["level", "refresh"]
+
+
+async def test_group_turn_on_refreshes_when_kelvin_fails_after_level(
+    light_module, addresses_payload: dict, devices_payload: dict
+) -> None:
+    from atx_led.client import ATXLEDApiError
+
+    entity, calls = _entity(light_module, addresses_payload, devices_payload, is_on=False)
+
+    async def fail(group, lights, kelvin):
+        calls.append(("kelvin", kelvin))
+        raise ATXLEDApiError("Group has no known color-temperature members")
+
+    entity.coordinator.client.async_set_group_color_temp = fail
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        await entity.async_turn_on(color_temp_kelvin=2700)
+    assert [call[0] for call in calls] == ["level", "kelvin", "refresh"]

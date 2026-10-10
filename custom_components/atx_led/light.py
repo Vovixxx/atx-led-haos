@@ -340,7 +340,9 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
                 self.coordinator.async_group_color_temp_written(group.device_id, kelvin)
         except (ATXLEDError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
+        finally:
+            # The level may already be applied when a later Kelvin write fails.
+            await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         group = self._group
