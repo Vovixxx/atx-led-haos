@@ -1,7 +1,7 @@
 # One-call turn-on: brightness and colour together
 
 Date: 2026-10-10  
-Status: draft, owner review  
+Status: approved, released in 0.5.6  
 Integration: `custom_components/atx_led`
 
 ## Problem
