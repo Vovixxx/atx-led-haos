@@ -329,22 +329,6 @@ async def test_scene_with_members_on_another_channel_is_rejected() -> None:
     assert session.calls == []
 
 
-async def test_set_device_level_posts_hub_level() -> None:
-    session = FakeSession(
-        {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_51"): FakeResponse(
-                200, {"ok": True}
-            )
-        }
-    )
-    client = _client(session)
-    await client.async_set_device_level("0_s_51", 180)
-    method, url, kwargs = session.calls[0]
-    assert method == "POST"
-    assert url.endswith("/dali/api/devices/0_s_51")
-    assert kwargs["json"] == {"level": 180}
-
-
 async def test_discover_inventory_merges_groups_api_when_devices_omit_them(
     addresses_payload: dict, devices_payload: dict, scenes_payload: dict
 ) -> None:
@@ -378,167 +362,45 @@ async def test_discover_inventory_merges_groups_api_when_devices_omit_them(
     assert "0_s_1" in dali.members
 
 
-async def test_set_group_color_temp_writes_member_devices(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    from atx_led.models import reconcile_groups, reconcile_lights
-
-    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
-    group = next(
-        item
-        for item in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
-        if item.device_id == "0_g_1"
-    )
-    group = group.__class__(
-        **{
-            **group.__dict__,
-            "has_color_temp": True,
-            "members": ("0_s_1", "0_s_11"),
-        }
-    )
+async def test_one_send_raw_call_carries_colour_and_level() -> None:
     session = FakeSession(
         {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
+            ("POST", "http://192.168.1.50/dali/api/send-raw"): FakeResponse(
+                200, {"ok": True, "responses": ["N", "N", "N", "N", "N"]}
+            )
         }
     )
-    client = _client(session)
-    await client.async_set_group_color_temp(group, lights, 3000)
-    posted = [url for _method, url, _kwargs in session.calls]
-    assert posted == ["http://192.168.1.50/dali/api/devices/0_s_1"]
-    assert session.calls[0][2]["json"] == {"color_temp_k": 3000}
+    frames = ["hA372", "hC301", "hC108", "h8DE7", "h8CFD"]
+    await _client(session).async_send_raw(0, frames)
+    assert len(session.calls) == 1
+    assert session.calls[0][2]["json"] == {"channel": 0, "commands": frames}
 
 
-async def test_group_color_temp_without_known_members_does_not_post_to_group(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    from atx_led.models import reconcile_groups
-
-    group = reconcile_groups(addresses_payload, devices_payload)[0]
-    session = FakeSession({})
-    with pytest.raises(ATXLEDApiError, match="no known"):
-        await _client(session).async_set_group_color_temp(group, {}, 3000)
-    assert session.calls == []
-
-
-def _cct_group_and_lights(addresses_payload: dict, devices_payload: dict):
-    from atx_led.models import reconcile_groups, reconcile_lights
-
-    lights = {light.device_id: light for light in reconcile_lights(addresses_payload, devices_payload)}
-    group = next(
-        item
-        for item in reconcile_groups(addresses_payload, devices_payload, list(lights.values()))
-        if item.device_id == "0_g_1"
-    )
-    group = group.__class__(
-        **{**group.__dict__, "has_color_temp": True, "members": ("0_s_1", "0_s_21")}
-    )
-    return group, lights
-
-
-async def test_group_color_temp_skips_members_already_at_target(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _cct_group_and_lights(addresses_payload, devices_payload)
-    lights["0_s_1"] = lights["0_s_1"].__class__(**{**lights["0_s_1"].__dict__, "color_temp_k": 2702})
-    session = FakeSession({})
-    await _client(session).async_set_group_color_temp(group, lights, 2702)
-    assert session.calls == []
-
-
-async def test_group_color_temp_writes_only_members_off_target(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _cct_group_and_lights(addresses_payload, devices_payload)
+async def test_query_color_mirek_reads_the_driver_not_the_hub_record() -> None:
     session = FakeSession(
         {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
+            ("POST", "http://192.168.1.50/dali/api/send-raw"): FakeResponse(
+                200, {"ok": True, "responses": ["N", "N", "J01", "J72"]}
+            )
         }
     )
-    # 0_s_1 reports 4065 K, 0_s_21 already reports 2702 K.
-    await _client(session).async_set_group_color_temp(group, lights, 2702)
-    assert [(url, kwargs["json"]) for _method, url, kwargs in session.calls] == [
-        ("http://192.168.1.50/dali/api/devices/0_s_1", {"color_temp_k": 2702})
-    ]
+    assert await _client(session).async_query_color_mirek(0, 17) == 370
+    assert session.calls[0][2]["json"]["commands"] == ["hA302", "hC108", "h23FA", "h2398"]
 
 
-def _member_record(short_addr: int, kelvin: int) -> dict:
-    return {"address": [0, "single", short_addr], "short_addr": short_addr, "color_temp_k": kelvin}
-
-
-def _three_member_group(addresses_payload: dict, devices_payload: dict):
-    group, lights = _cct_group_and_lights(addresses_payload, devices_payload)
-    for device_id, kelvin in (("0_s_1", 4065), ("0_s_21", 4000)):
-        lights[device_id] = lights[device_id].__class__(
-            **{**lights[device_id].__dict__, "color_temp_k": kelvin}
-        )
-    return group, lights
-
-
-async def test_group_color_temp_uses_one_group_write_when_hub_covers_members(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _three_member_group(addresses_payload, devices_payload)
+async def test_query_color_mirek_is_none_when_the_driver_does_not_answer() -> None:
     session = FakeSession(
         {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_g_1"): FakeResponse(
-                200, {"ok": True, "data": [_member_record(1, 2700), _member_record(21, 2700)]}
-            ),
+            ("POST", "http://192.168.1.50/dali/api/send-raw"): FakeResponse(
+                200, {"ok": True, "responses": ["N", "N", "N", "N"]}
+            )
         }
     )
-    await _client(session).async_set_group_color_temp(group, lights, 2700)
-    assert [(url, kwargs["json"]) for _method, url, kwargs in session.calls] == [
-        ("http://192.168.1.50/dali/api/devices/0_g_1", {"color_temp_k": 2700})
-    ]
+    assert await _client(session).async_query_color_mirek(0, 17) is None
 
 
-async def test_group_color_temp_writes_members_the_group_write_missed(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _three_member_group(addresses_payload, devices_payload)
-    session = FakeSession(
-        {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_g_1"): FakeResponse(
-                200, {"ok": True, "data": [_member_record(1, 2700)]}
-            ),
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_21"): FakeResponse(200, {"ok": True}),
-        }
-    )
-    await _client(session).async_set_group_color_temp(group, lights, 2700)
-    assert [url for _method, url, _kwargs in session.calls] == [
-        "http://192.168.1.50/dali/api/devices/0_g_1",
-        "http://192.168.1.50/dali/api/devices/0_s_21",
-    ]
+async def test_hub_colour_and_level_requests_are_gone() -> None:
+    client = _client(FakeSession({}))
+    for name in ("async_set_color_temp_k", "async_set_group_color_temp", "async_set_device_level"):
+        assert not hasattr(client, name)
 
-
-async def test_group_color_temp_falls_back_when_group_write_rejected(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _three_member_group(addresses_payload, devices_payload)
-    session = FakeSession(
-        {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_g_1"): FakeResponse(200, {"ok": False}),
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_21"): FakeResponse(200, {"ok": True}),
-        }
-    )
-    await _client(session).async_set_group_color_temp(group, lights, 2700)
-    assert [url for _method, url, _kwargs in session.calls] == [
-        "http://192.168.1.50/dali/api/devices/0_g_1",
-        "http://192.168.1.50/dali/api/devices/0_s_1",
-        "http://192.168.1.50/dali/api/devices/0_s_21",
-    ]
-
-
-async def test_group_color_temp_empty_group_response_falls_back(
-    addresses_payload: dict, devices_payload: dict
-) -> None:
-    group, lights = _three_member_group(addresses_payload, devices_payload)
-    session = FakeSession(
-        {
-            ("POST", "http://192.168.1.50/dali/api/devices/0_g_1"): FakeResponse(200, {"ok": True, "data": []}),
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_1"): FakeResponse(200, {"ok": True}),
-            ("POST", "http://192.168.1.50/dali/api/devices/0_s_21"): FakeResponse(200, {"ok": True}),
-        }
-    )
-    await _client(session).async_set_group_color_temp(group, lights, 2700)
-    assert len(session.calls) == 3

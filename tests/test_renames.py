@@ -45,6 +45,8 @@ def entity_modules(monkeypatch: pytest.MonkeyPatch):
     device_registry.async_get = lambda _hass: registry
     entity_platform = ModuleType("homeassistant.helpers.entity_platform")
     entity_platform.AddConfigEntryEntitiesCallback = object
+    restore_state = ModuleType("homeassistant.helpers.restore_state")
+    restore_state.RestoreEntity = type("RestoreEntity", (), {})
     update_coordinator = ModuleType("homeassistant.helpers.update_coordinator")
 
     class CoordinatorEntity:
@@ -67,7 +69,8 @@ def entity_modules(monkeypatch: pytest.MonkeyPatch):
     coordinator_module.ATXLEDCoordinator = type("ATXLEDCoordinator", (), {})
     modules = (
         homeassistant, components, light, scene, core, exceptions, helpers,
-        device_registry, entity_platform, update_coordinator, coordinator_module,
+        device_registry, entity_platform, restore_state, update_coordinator,
+        coordinator_module,
     )
     with monkeypatch.context() as patch:
         for module in modules:

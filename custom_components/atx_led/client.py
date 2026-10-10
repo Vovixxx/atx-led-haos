@@ -18,12 +18,13 @@ from .models import (
     reconcile_lights,
 )
 from .protocol import (
-    DALI_MAX_ARC_LEVEL,
     dapc_frame,
+    decode_colour_temperature_mirek,
     decode_send_raw_payload,
     go_to_scene_frame,
     group_dapc_frame,
     group_go_to_scene_frame,
+    query_colour_temperature_frames,
     SHORT_ADDR_MAX,
     SendRawResult,
 )
@@ -49,7 +50,10 @@ class ATXLEDApiError(ATXLEDError):
 
 
 class ATXLEDClient:
-    """Serialized aiohttp client for inventory and raw DALI commands."""
+    """Serialized aiohttp client for inventory and raw DALI commands.
+
+    Control is `async_send_raw` only: one call carries colour and level frames together.
+    """
 
     def __init__(
         self,
@@ -187,6 +191,11 @@ class ATXLEDClient:
             raise ATXLEDApiError("Hub rejected the DALI command")
         return result
 
+    async def async_query_color_mirek(self, channel: int, short_addr: int) -> int | None:
+        """Read a fixture's colour temperature (mirek) from the driver. None if unanswered."""
+        result = await self.async_send_raw(channel, query_colour_temperature_frames(short_addr))
+        return decode_colour_temperature_mirek(result)
+
     async def async_set_level(self, channel: int, short_addr: int, level: int) -> SendRawResult:
         return await self.async_send_raw(channel, [dapc_frame(short_addr, level)])
 
@@ -236,31 +245,6 @@ class ATXLEDClient:
     async def async_open_groups_socket(self) -> Any:
         """Open the groups push socket. Do not send frames; listen only."""
         return await self._async_open_socket(self.websocket_groups_url)
-
-    async def async_set_color_temp_k(self, device_id: str, kelvin: int) -> Any:
-        """Set color temperature using the hub device endpoint (source-observed)."""
-        async with self._lock:
-            payload = await self._request(
-                "post",
-                f"/dali/api/devices/{device_id}",
-                json={"color_temp_k": int(kelvin)},
-            )
-            if isinstance(payload, dict) and payload.get("ok") is False:
-                raise ATXLEDApiError("Hub rejected the color temperature command")
-            return payload
-
-    async def async_set_device_level(self, device_id: str, level: int) -> Any:
-        """Set brightness using the hub device endpoint so configured fade can apply."""
-        raw = max(0, min(int(level), DALI_MAX_ARC_LEVEL))
-        async with self._lock:
-            payload = await self._request(
-                "post",
-                f"/dali/api/devices/{device_id}",
-                json={"level": raw},
-            )
-            if isinstance(payload, dict) and payload.get("ok") is False:
-                raise ATXLEDApiError("Hub rejected the brightness command")
-            return payload
 
     async def async_recall_scene(
         self,
@@ -318,60 +302,3 @@ class ATXLEDClient:
         channel = channels.pop()
         commands = [go_to_scene_frame(addr, scene.dali_scene) for _channel, addr in targets]
         return await self.async_send_raw(channel, commands)
-
-    async def async_set_group_color_temp(
-        self,
-        group: GroupDevice,
-        lights: dict[str, LightDevice],
-        kelvin: int,
-    ) -> None:
-        """Set group Kelvin with one group write, then fill in missed members.
-
-        The hub fans a group ``color_temp_k`` POST out to its own member list and
-        returns the updated fixture records. Members it did not report at the
-        target Kelvin get a direct fixture write. Members already reported at the
-        target Kelvin are skipped.
-        """
-        targets = [
-            member_id
-            for member_id in group.members
-            if member_id in lights and lights[member_id].has_color_temp
-        ]
-        if not targets:
-            raise ATXLEDApiError("Group has no known color-temperature members")
-        kelvin = int(kelvin)
-        pending = [
-            device_id for device_id in targets if lights[device_id].color_temp_k != kelvin
-        ]
-        if not pending:
-            return
-        written: set[str] = set()
-        if len(pending) > 1:
-            try:
-                payload = await self.async_set_color_temp_k(group.device_id, kelvin)
-            except ATXLEDApiError:
-                payload = None
-            written = _records_at_kelvin(payload, kelvin)
-        for device_id in pending:
-            if device_id not in written:
-                await self.async_set_color_temp_k(device_id, kelvin)
-
-
-def _records_at_kelvin(payload: Any, kelvin: int) -> set[str]:
-    """Fixture ids a device write response reports at ``kelvin``."""
-    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-        return set()
-    written: set[str] = set()
-    for record in payload["data"]:
-        if not isinstance(record, dict) or record.get("color_temp_k") != kelvin:
-            continue
-        address = record.get("address")
-        if (
-            isinstance(address, list)
-            and len(address) == 3
-            and address[1] == "single"
-            and isinstance(address[0], int)
-            and isinstance(address[2], int)
-        ):
-            written.add(f"{address[0]}_s_{address[2]}")
-    return written

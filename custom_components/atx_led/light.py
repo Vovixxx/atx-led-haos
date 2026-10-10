@@ -16,12 +16,14 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .brightness import dali_to_ha_brightness, ha_brightness_to_dali, use_hub_device_level_for_brightness
+from .brightness import dali_to_ha_brightness, ha_brightness_to_dali
 from .client import ATXLEDError
 from .const import (
     ATTR_DALI_CHANNEL,
+    ATTR_DALI_COLOR_TEMP_KELVIN,
     ATTR_DALI_GROUP_ADDRESS,
     ATTR_DALI_GROUP_KIND,
     ATTR_DALI_MEMBERS,
@@ -29,19 +31,13 @@ from .const import (
     ATTR_DALI_STATE_SOURCE,
     ATTR_DALI_STATUS,
 )
+from .commands import kelvin_limits
 from .coordinator import ATXLEDConfigEntry, ATXLEDCoordinator
 from .device_info import light_device_registry_info
-from .models import GroupDevice, LightDevice, color_temp_range_kelvin
+from .models import GroupDevice, LightDevice
 from .protocol import DALI_MAX_ARC_LEVEL
 
 PARALLEL_UPDATES = 1
-
-
-def _kelvin_limits(device: LightDevice | GroupDevice) -> tuple[int, int] | None:
-    minimum, maximum = color_temp_range_kelvin(device.user_warm, device.user_cool)
-    if minimum and maximum:
-        return (minimum, maximum)
-    return None
 
 
 def _restore_level(device: LightDevice | GroupDevice) -> int:
@@ -61,6 +57,10 @@ async def async_setup_entry(
     update_lights = partial(async_add_new_lights, coordinator, current_ids, async_add_entities)
     entry.async_on_unload(coordinator.async_add_listener(update_lights))
     update_lights()
+    # Colour for fixtures never written comes from the driver, once, one fixture at a time.
+    entry.async_create_background_task(
+        hass, coordinator.async_read_missing_colors(), "atx-led-read-colors"
+    )
 
 
 @callback
@@ -92,7 +92,7 @@ def async_add_new_lights(
         async_add_entities(new_entities)
 
 
-class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
+class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], RestoreEntity, LightEntity):
     """A commissioned ATX LED DALI fixture."""
 
     _attr_has_entity_name = True
@@ -114,7 +114,7 @@ class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         self._apply_capabilities(device)
 
     def _apply_capabilities(self, device: LightDevice | None) -> None:
-        limits = _kelvin_limits(device) if device else None
+        limits = kelvin_limits(device) if device else None
         if device and device.has_color_temp and limits:
             self._attr_supported_color_modes = {ColorMode.COLOR_TEMP}
             self._attr_color_mode = ColorMode.COLOR_TEMP
@@ -170,52 +170,74 @@ class ATXLEDLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         device = self._device
         if device is None:
             return {}
-        return {
+        attributes: dict[str, Any] = {
             ATTR_DALI_CHANNEL: device.channel,
             ATTR_DALI_SHORT_ADDRESS: device.short_addr,
             ATTR_DALI_STATUS: device.status,
         }
+        if device.has_color_temp and device.color_temp_k is not None:
+            # Home Assistant drops color_temp_kelvin while the light is off; keep it for restore.
+            attributes[ATTR_DALI_COLOR_TEMP_KELVIN] = device.color_temp_k
+        return attributes
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+        kelvin = last_state.attributes.get(ATTR_DALI_COLOR_TEMP_KELVIN)
+        if kelvin is None:
+            kelvin = last_state.attributes.get(ATTR_COLOR_TEMP_KELVIN)
+        try:
+            kelvin = int(kelvin) if kelvin is not None else None
+        except (TypeError, ValueError):
+            kelvin = None
+        if kelvin:
+            self.coordinator.async_restore_color(self.device_id, kelvin)
+
+    def _intended_on(self, device: LightDevice) -> bool:
+        intended = self.coordinator.intended_on(self.device_id)
+        return bool(device.is_on) if intended is None else intended
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         device = self._device
         if device is None:
             raise HomeAssistantError("Light is unavailable")
+        kelvin = kwargs.get(ATTR_COLOR_TEMP_KELVIN) if device.has_color_temp else None
+        if ATTR_BRIGHTNESS in kwargs:
+            level = ha_brightness_to_dali(
+                int(kwargs[ATTR_BRIGHTNESS]), device.min_level, device.max_level
+            )
+        elif not self._intended_on(device):
+            level = _restore_level(device)
+        elif kelvin is None:
+            return  # already on, nothing to change
+        else:
+            level = None  # colour only: the call re-sends the current level
         try:
-            if ATTR_COLOR_TEMP_KELVIN in kwargs and device.has_color_temp:
-                await self.coordinator.client.async_set_color_temp_k(
-                    device.device_id, int(kwargs[ATTR_COLOR_TEMP_KELVIN])
-                )
-            if ATTR_BRIGHTNESS in kwargs:
-                level = ha_brightness_to_dali(
-                    int(kwargs[ATTR_BRIGHTNESS]), device.min_level, device.max_level
-                )
-                if use_hub_device_level_for_brightness(device.is_on) and level > 0:
-                    await self.coordinator.client.async_set_device_level(
-                        device.device_id, level
-                    )
-                else:
-                    await self.coordinator.client.async_set_level(
-                        device.channel, device.short_addr, level
-                    )
-            elif not device.is_on:
-                await self.coordinator.client.async_set_level(
-                    device.channel, device.short_addr, _restore_level(device)
-                )
-        except ATXLEDError as err:
+            await self.coordinator.async_set_light(
+                device.device_id, level, None if kelvin is None else int(kelvin)
+            )
+        except (ATXLEDError, ValueError) as err:
+            await self.coordinator.async_request_refresh()
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         device = self._device
         if device is None:
             raise HomeAssistantError("Light is unavailable")
         try:
-            await self.coordinator.client.async_set_level(
-                device.channel, device.short_addr, 0
-            )
-        except ATXLEDError as err:
+            await self.coordinator.async_set_light(device.device_id, 0)
+        except (ATXLEDError, ValueError) as err:
+            await self.coordinator.async_request_refresh()
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
+
+    async def async_toggle(self, **kwargs: Any) -> None:
+        device = self._device
+        if device is not None and self._intended_on(device):
+            await self.async_turn_off()
+        else:
+            await self.async_turn_on(**kwargs)
 
 
 class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
@@ -241,7 +263,7 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
         self._apply_capabilities(group)
 
     def _apply_capabilities(self, group: GroupDevice | None) -> None:
-        limits = _kelvin_limits(group) if group else None
+        limits = kelvin_limits(group) if group else None
         lights = self.coordinator.data.lights if self.coordinator.data else {}
         has_cct_member = bool(group) and any(
             member_id in lights and lights[member_id].has_color_temp
@@ -310,46 +332,46 @@ class ATXLEDGroupLight(CoordinatorEntity[ATXLEDCoordinator], LightEntity):
             ATTR_DALI_STATE_SOURCE: group.state_source,
         }
 
-    async def _async_set_level(self, group: GroupDevice, level: int) -> None:
-        if group.is_dali_group:
-            await self.coordinator.client.async_set_group_level(
-                group.channel, group.group_addr, level
-            )
-            return
-        await self.coordinator.client.async_set_device_level(group.device_id, level)
+    def _intended_on(self, group: GroupDevice) -> bool:
+        intended = self.coordinator.intended_on(self.device_id)
+        return bool(group.is_on) if intended is None else intended
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         group = self._group
         if group is None:
             raise HomeAssistantError("Group is unavailable")
+        kelvin = kwargs.get(ATTR_COLOR_TEMP_KELVIN) if group.has_color_temp else None
+        if ATTR_BRIGHTNESS in kwargs:
+            level = ha_brightness_to_dali(
+                int(kwargs[ATTR_BRIGHTNESS]), group.min_level, group.max_level
+            )
+        elif not self._intended_on(group):
+            level = _restore_level(group)
+        elif kelvin is None:
+            return  # already on, nothing to change
+        else:
+            level = None  # colour only: the call re-sends the current level
         try:
-            # Send the level first: member Kelvin writes are serial and slow.
-            if ATTR_BRIGHTNESS in kwargs:
-                level = ha_brightness_to_dali(
-                    int(kwargs[ATTR_BRIGHTNESS]), group.min_level, group.max_level
-                )
-                await self._async_set_level(group, level)
-            elif not group.is_on:
-                await self._async_set_level(group, _restore_level(group))
-            if ATTR_COLOR_TEMP_KELVIN in kwargs and group.has_color_temp:
-                lights = self.coordinator.data.lights if self.coordinator.data else {}
-                kelvin = int(kwargs[ATTR_COLOR_TEMP_KELVIN])
-                await self.coordinator.client.async_set_group_color_temp(
-                    group, lights, kelvin
-                )
-                self.coordinator.async_group_color_temp_written(group.device_id, kelvin)
+            await self.coordinator.async_set_group(
+                group.device_id, level, None if kelvin is None else int(kelvin)
+            )
         except (ATXLEDError, ValueError) as err:
-            raise HomeAssistantError(str(err)) from err
-        finally:
-            # The level may already be applied when a later Kelvin write fails.
             await self.coordinator.async_request_refresh()
+            raise HomeAssistantError(str(err)) from err
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         group = self._group
         if group is None:
             raise HomeAssistantError("Group is unavailable")
         try:
-            await self._async_set_level(group, 0)
+            await self.coordinator.async_set_group(group.device_id, 0)
         except (ATXLEDError, ValueError) as err:
+            await self.coordinator.async_request_refresh()
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
+
+    async def async_toggle(self, **kwargs: Any) -> None:
+        group = self._group
+        if group is not None and self._intended_on(group):
+            await self.async_turn_off()
+        else:
+            await self.async_turn_on(**kwargs)

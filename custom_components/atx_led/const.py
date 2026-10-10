@@ -10,6 +10,7 @@ DEFAULT_SCAN_INTERVAL = timedelta(seconds=15)
 HUB_MODEL = "Smart Hub"
 
 ATTR_DALI_CHANNEL = "dali_channel"
+ATTR_DALI_COLOR_TEMP_KELVIN = "dali_color_temp_kelvin"
 ATTR_DALI_SHORT_ADDRESS = "dali_short_address"
 ATTR_DALI_STATUS = "dali_status"
 ATTR_DALI_GROUP_ADDRESS = "dali_group_address"

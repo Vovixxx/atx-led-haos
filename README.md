@@ -28,11 +28,11 @@ Copy `custom_components/atx_led` to `/config/custom_components/atx_led` on the H
 - One light entity per DALI group and hub virtual group. The broadcast `all` target is not imported.
 - Group display names use the hub `hue_name` when present, then a commissioned `dev_name` or addresses label before a generated `Group N` label. Name changes update existing Home Assistant group devices while user-assigned names remain in Home Assistant.
 - One scene entity per saved hub scene; explicitly numbered DALI scenes are also supported.
-- Fixture on/off uses `POST /dali/api/send-raw` Direct Arc Power Control.
-- DALI group on/off uses group DAPC (`group * 2 + 0x80`). Virtual groups use the hub device `level` write.
+- Every turn-on, dim and turn-off is one `POST /dali/api/send-raw` call that ends in Direct Arc Power Control. A colour change puts the temporary-colour frames in front of the same call, so brightness and colour apply in one fade.
+- DALI groups use group DAPC (`group * 2 + 0x80`). Virtual groups send the same frames per member.
 - Brightness follows the hub UI mapping `(level - min) / (max - min)`.
-- Brightness changes while a fixture is on use `POST /dali/api/devices/{id}` with `level` so the hub fade can apply. DALI groups keep using group DAPC.
-- Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Groups expose Kelvin when known member fixtures support it; a change is one group write, with direct writes to any member the hub did not update. The group reports its members' Kelvin when they all agree, because the hub group record does not track member writes.
+- A quick second press replaces a command still waiting for the same light or group; the one being sent completes. Toggle follows the intended state, so a fast double press is on, then off.
+- Color-temperature fixtures expose a Kelvin slider when `has_color_temp` is set. Home Assistant owns the colour: it remembers what it last wrote (kept across restarts) and reads each never-written fixture once from its driver at start-up; the hub's `color_temp_k` is not used. Groups expose Kelvin when known member fixtures support it, and report a colour while their colour members agree.
 - Leftover drivers the hub cannot characterize (empty type, zero serial/firmware) stay dimmers until you open **Configure** on the integration, pick a mode, and set min/max dim and Kelvin by sight. Those values stay in Home Assistant and are not written to the hub.
 - Saved hub scenes from `/dali/api/scenes` activate through `POST /dali/api/scenes/{id}/trigger`. Explicitly numbered DALI scenes use GO TO SCENE for their listed group or member fixtures.
 - State updates immediately from `/ws/dali/devices` and `/ws/dali/groups` when the hub reports a change. HTTP inventory (`addresses`, `devices`, best-effort `groups` and `scenes`) is still polled every 15 seconds as a backup. The sockets answer the hub's own pings and reconnect after 120 seconds of silence; the hub does not answer client pings. Failed reads become unavailable, not off.

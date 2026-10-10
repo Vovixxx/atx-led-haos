@@ -7,7 +7,12 @@ from atx_led.protocol import (
     go_to_scene_frame,
     group_command_frame,
     group_dapc_frame,
+    decode_colour_temperature_mirek,
     group_go_to_scene_frame,
+    kelvin_to_mirek,
+    mirek_to_kelvin,
+    on_command_frames,
+    query_colour_temperature_frames,
     query_status_level_max_min,
 )
 
@@ -82,3 +87,60 @@ def test_group_frames_reject_invalid_group() -> None:
     except ValueError:
         return
     raise AssertionError("expected ValueError")
+
+
+def test_group_on_frames_match_live_probe_golden() -> None:
+    frames = on_command_frames(253, mirek=370, group_addr=6)
+    assert frames == ["hA372", "hC301", "hC108", "h8DE7", "h8CFD"]
+
+
+def test_short_address_on_frames_use_command_and_dapc_bytes() -> None:
+    frames = on_command_frames(253, mirek=370, short_addr=31)
+    assert frames == ["hA372", "hC301", "hC108", "h3FE7", "h3EFD"]
+
+
+def test_on_frames_without_colour_are_a_single_dapc() -> None:
+    assert on_command_frames(185, short_addr=1) == ["h02B9"]
+    assert on_command_frames(0, group_addr=1) == ["h8200"]
+
+
+def test_on_frames_need_exactly_one_target() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        on_command_frames(100)
+    with pytest.raises(ValueError):
+        on_command_frames(100, short_addr=1, group_addr=1)
+
+
+def test_kelvin_to_mirek_rounds() -> None:
+    assert kelvin_to_mirek(2700) == 370
+    assert kelvin_to_mirek(4000) == 250
+    assert kelvin_to_mirek(6500) == 154
+
+
+def test_kelvin_to_mirek_clamps_kelvin_to_the_light_range() -> None:
+    assert kelvin_to_mirek(1000, 2700, 6500) == 370
+    assert kelvin_to_mirek(9000, 2700, 6500) == 154
+    assert kelvin_to_mirek(4000, 2700, 6500) == 250
+
+
+def test_mirek_to_kelvin_rounds_and_rejects_zero() -> None:
+    assert mirek_to_kelvin(370) == 2703
+    assert mirek_to_kelvin(0) is None
+
+
+def test_colour_query_frames_read_msb_then_lsb() -> None:
+    assert query_colour_temperature_frames(17) == ["hA302", "hC108", "h23FA", "h2398"]
+
+
+def test_decode_colour_temperature_reply() -> None:
+    reply = decode_send_raw_payload({"ok": True, "responses": ["N", "N", "J01", "J72"]})
+    assert decode_colour_temperature_mirek(reply) == 370
+
+
+def test_decode_colour_temperature_reply_unusable() -> None:
+    no_answer = decode_send_raw_payload({"ok": True, "responses": ["N", "N", "N", "N"]})
+    assert decode_colour_temperature_mirek(no_answer) is None
+    mask = decode_send_raw_payload({"ok": True, "responses": ["N", "N", "JFF", "JFF"]})
+    assert decode_colour_temperature_mirek(mask) is None

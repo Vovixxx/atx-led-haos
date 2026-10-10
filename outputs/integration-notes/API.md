@@ -88,13 +88,25 @@ Wrong paths (`/ws/dali/devices/0_s_1`, query strings, trailing slash) drop the c
 
 ## Device writes
 
-Verified: `POST /dali/api/devices/{id}` with `color_temp_k` sets Kelvin on color-temperature fixtures.
+Since 0.5.6 every control is one `POST /dali/api/send-raw` call that ends in DAPC, so level and colour apply in one fade:
 
-Verified 2026-10-10 on a DALI group (`0_g_15`, three DT8 members): `POST /dali/api/devices/0_g_N` with `color_temp_k` takes one request (~0.4 s), applies the Kelvin to every member the hub lists in the group's `device_ids`, and returns `{"ok": true, "data": [...]}` with the updated member fixture records. The group's own record keeps its old `color_temp_k`. A group with no members returns `{"ok": true, "data": []}`.
+```
+hA3{mirek LSB}  hC3{mirek MSB}  hC108  h{cmd addr}E7   # DTR0, DTR1, ENABLE DEVICE TYPE 8, SET TEMPORARY COLOUR TEMPERATURE
+h{dapc addr}{level}                                   # DAPC applies level and the temporary colour
+```
 
-Driver readback confirmed it, not just the hub records: DT8 `QUERY COLOUR VALUE` for colour temperature (`["hA302","hC108","h{addr*2+1:02X}FA","h{addr*2+1:02X}98"]`, MSB then DTR0 LSB, in mireds) moved from 370 to 200 on all three members after a 5000 K group write, with the fixtures off. Readings taken within a second can still be mid-fade.
+`mirek = round(1_000_000 / kelvin)` after clamping Kelvin to the light's range. Short address `sa`: DAPC byte `sa*2`, command byte `sa*2+1`; DALI group `g`: `0x80+g*2` and `0x81+g*2`. Golden: group 6, 2700 K, level 253 is `["hA372","hC301","hC108","h8DE7","h8CFD"]`. Colour frames are left out when the light has no colour support or the remembered colour already equals the target (a single DAPC). A virtual group sends the same frames per member, all members on one channel in one call. Off is DAPC 0.
 
-Verified for dimming while on: `POST /dali/api/devices/{id}` with `level` so the hub can apply its configured fade. On/off still uses `send-raw` DAPC.
+Verified 2026-10-10 (driver readback, `docs/superpowers/specs/2026-10-10-dali-turn-on-design.md`): this works on every driver type, including the unsigned MiBoxer drivers, which land exactly on target.
+
+The hub requests are **no longer used for control**:
+
+- `POST /dali/api/devices/{id}` with `color_temp_k` (and the group form that fans out to members): on the spot drivers, sent ~26 ms after a DAPC, it freezes the running fade (lights stay dim while the hub reports full); it takes 0.4–1.0 s and lands off target on the MiBoxer drivers (4500 K became 4292 K).
+- `POST /dali/api/devices/{id}` with `level`: gains nothing over raw DAPC (same fade curve on the spot drivers, and it adds ~0.5 s).
+
+The hub does not learn colour from raw DT8 frames: its `color_temp_k` keeps the last value set through its own colour request. So Home Assistant owns colour: the integration keeps a written-colour map (restored through the light entity's last state), reads colour once from the driver at start-up for fixtures never written, and ignores the hub's `color_temp_k`. Level and on/off still come from the hub (WebSocket and the 15 s poll).
+
+Driver readback of colour: DT8 `QUERY COLOUR VALUE` for colour temperature (`["hA302","hC108","h{addr*2+1:02X}FA","h{addr*2+1:02X}98"]`, MSB then DTR0 LSB, in mireds). Readings taken within a second can still be mid-fade.
 
 Observed in web-interface source; not independently used by this integration:
 
@@ -107,9 +119,9 @@ GET `/dali/api/groups` is requested best-effort. Records on this hub (and likely
 
 Display names prefer `hue_name`, then `dev_name`, then the `/dali/api/addresses` label. That order is hub-agnostic: Hue-linked installs get room names, others keep `dev_name`.
 
-Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address and use the hub device `level` write instead. Do not treat a virtual group id as interchangeable with the DALI group that shares the same numeric index.
+Group DAPC encoding follows the HAT docs: address byte `group * 2 + 0x80` (0x80–0x9E), command byte `group * 2 + 0x81` (0x81–0x9F). Virtual groups have no DALI group address; they send the same frames per member. Do not treat a virtual group id as interchangeable with the DALI group that shares the same numeric index.
 
-Group records are often missing `has_color_temp`. If member fixtures advertise color temperature, the group light exposes Kelvin. A Kelvin change sends one group write, then writes directly to any color-temperature member the response does not report at the target Kelvin. Members already at the target are skipped. Hub group `dev_on`/`level` win when present; otherwise on/off is derived from members until `/ws/dali/groups` sends a patch.
+Group records are often missing `has_color_temp`. If member fixtures advertise color temperature, the group light exposes Kelvin. A Kelvin change is part of the group's one send-raw call, and the integration records it on each member; the group shows a colour only while its colour members agree. Hub group `dev_on`/`level` win when present; otherwise on/off is derived from members until `/ws/dali/groups` sends a patch.
 
 Do not present remaining untested source-observed endpoints as integration controls.
 
