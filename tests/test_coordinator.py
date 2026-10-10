@@ -361,3 +361,52 @@ async def test_intended_state_follows_the_newest_press_while_sending(
     await asyncio.gather(on, off)
     assert [frames for _channel, frames in coordinator.client.sent] == [["h02C8"], ["h0200"]]
     assert coordinator.data.lights["0_s_1"].is_on is False
+
+
+async def test_cancelled_waiting_press_is_dropped_and_queue_survives(
+    coordinator_module, addresses_payload, devices_payload
+) -> None:
+    coordinator, _group = _make(coordinator_module, addresses_payload, devices_payload)
+    coordinator.client.gate = asyncio.Event()
+    first = asyncio.create_task(coordinator.async_set_light("0_s_1", 100, None))
+    await coordinator.client.entered.wait()
+    waiting = asyncio.create_task(coordinator.async_set_light("0_s_1", 150, None))
+    await asyncio.sleep(0)
+    waiting.cancel()
+    await asyncio.sleep(0)
+    coordinator.client.gate.set()
+    await first
+    assert [f for _c, f in coordinator.client.sent] == [["h0264"]]
+    await coordinator.async_set_light("0_s_1", 200, None)  # queue still works
+    assert [f for _c, f in coordinator.client.sent][-1] == ["h02C8"]
+
+
+async def test_cancelled_in_flight_caller_does_not_lose_the_waiting_press(
+    coordinator_module, addresses_payload, devices_payload
+) -> None:
+    coordinator, _group = _make(coordinator_module, addresses_payload, devices_payload)
+    coordinator.client.gate = asyncio.Event()
+    on = asyncio.create_task(coordinator.async_set_light("0_s_1", 200, None))
+    await coordinator.client.entered.wait()
+    off = asyncio.create_task(coordinator.async_set_light("0_s_1", 0, None))
+    await asyncio.sleep(0)
+    on.cancel()
+    await asyncio.sleep(0)
+    coordinator.client.gate.set()
+    await off
+    assert [f for _c, f in coordinator.client.sent] == [["h02C8"], ["h0200"]]
+    assert coordinator.intended_on("0_s_1") is None
+
+
+async def test_restore_beats_a_startup_driver_read_but_not_a_write(
+    coordinator_module, addresses_payload, devices_payload
+) -> None:
+    coordinator, _group = _make(coordinator_module, addresses_payload, devices_payload)
+    coordinator.client.mirek_by_addr = {1: 250, 21: 250}
+    await coordinator.async_read_missing_colors()
+    assert coordinator.colors["0_s_1"] == 4000
+    coordinator.async_restore_color("0_s_1", 3500)
+    assert coordinator.colors["0_s_1"] == 3500
+    await coordinator.async_set_light("0_s_21", 200, 3000)
+    coordinator.async_restore_color("0_s_21", 5000)
+    assert coordinator.colors["0_s_21"] == 3003

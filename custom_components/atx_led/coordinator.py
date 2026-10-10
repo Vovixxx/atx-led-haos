@@ -91,6 +91,8 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
         self._write_times: dict[str, float] = {}
         self._intent: dict[str, bool] = {}
         self._queues: dict[str, _TargetQueue] = {}
+        self._drain_tasks: set[asyncio.Task[None]] = set()
+        self._driver_colors: set[str] = set()
 
     @property
     def colors(self) -> dict[str, int]:
@@ -148,8 +150,10 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
 
     def async_restore_color(self, device_id: str, kelvin: int) -> None:
         """Take a restored colour for a fixture we have not written or read yet."""
-        if device_id in self._colors or not kelvin:
+        if not kelvin or (device_id in self._colors and device_id not in self._driver_colors):
             return
+        # A saved Home Assistant colour beats a start-up driver read; a write of this run wins both.
+        self._driver_colors.discard(device_id)
         self._colors[device_id] = int(kelvin)
         self._republish_colors()
 
@@ -178,6 +182,7 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             kelvin = mirek_to_kelvin(mirek) if mirek else None
             if kelvin is not None and light.device_id not in self._colors:
                 self._colors[light.device_id] = kelvin
+                self._driver_colors.add(light.device_id)
         self._republish_colors()
 
     async def async_set_light(
@@ -202,38 +207,55 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
         if level is not None:
             self._intent[target_id] = level > 0
         queue = self._queues.setdefault(target_id, _TargetQueue())
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        entry = (job, future)
         if queue.running:
             # A newer press replaces one still waiting; the one being sent completes.
-            future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
             if queue.waiting is not None and not queue.waiting[1].done():
                 queue.waiting[1].set_result(None)
-            queue.waiting = (job, future)
-            await future
-            return
-        queue.running = True
-        error: Exception | None = None
+            queue.waiting = entry
+        else:
+            queue.running = True
+            task = asyncio.get_running_loop().create_task(
+                self._async_drain(target_id, queue, entry)
+            )
+            self._drain_tasks.add(task)
+            task.add_done_callback(self._drain_tasks.discard)
         try:
-            try:
-                await job()
-            except Exception as err:
-                error = err
-            while queue.waiting is not None:
-                next_job, future = queue.waiting
-                queue.waiting = None
+            # Shielded: cancelling a caller never cancels the accepted press.
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            if queue.waiting is entry:
+                queue.waiting = None  # not started yet: drop it
+            raise
+
+    async def _async_drain(
+        self,
+        target_id: str,
+        queue: _TargetQueue,
+        entry: tuple[Callable[[], Awaitable[None]], asyncio.Future[None]],
+    ) -> None:
+        """Run the queue in its own task so caller cancellation cannot lose accepted presses."""
+        try:
+            while entry is not None:
+                job, future = entry
                 try:
-                    await next_job()
+                    await job()
                 except Exception as err:
-                    future.set_exception(err)
+                    if not future.done():
+                        future.set_exception(err)
+                    else:
+                        _LOGGER.debug("ATX LED write failed after caller left: %s", err)
                 else:
-                    future.set_result(None)
+                    if not future.done():
+                        future.set_result(None)
+                entry, queue.waiting = queue.waiting, None
         finally:
-            if queue.waiting is not None:
+            if queue.waiting is not None and not queue.waiting[1].done():
                 queue.waiting[1].cancel()
-                queue.waiting = None
+            queue.waiting = None
             queue.running = False
             self._intent.pop(target_id, None)
-        if error is not None:
-            raise error
 
     async def _async_send(self, plan: CommandPlan) -> None:
         for channel, frames in plan.frames.items():
@@ -273,6 +295,7 @@ class ATXLEDCoordinator(DataUpdateCoordinator[ATXLEDData]):
             return
         now = time.monotonic()
         self._colors.update(colours)
+        self._driver_colors.difference_update(colours)
 
         def shown(device):
             if level is None:
