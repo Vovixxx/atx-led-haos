@@ -155,3 +155,20 @@ Live acceptance after release (owner yes; the 2026-10-10 probe method):
 - The owner confirms by eye whether the MiBoxer strips (arch, cabinet) fade or jump when dimmed while on. Their query
   reports the target at once with both methods, so this does not change the design. It only tells us whether they have a
   fade at all.
+
+## Tasks
+
+Test first, one commit per task. Run `uv run --extra dev pytest -q` and `uv run --extra dev ruff check custom_components tests`.
+
+1. **Frame builder** (`protocol.py`): temporary-colour frames for a short address and a DALI group, Kelvin clamp and mirek
+   rounding, and a builder that returns the full frame list for one command. Golden tests from the probe.
+2. **Client call** (`client.py`): one method that sends a built frame list through `send-raw` under the existing lock;
+   remove `async_set_color_temp_k`, `async_set_group_color_temp`, `async_set_device_level` and their helpers.
+3. **Lights and groups** (`light.py`, `brightness.py`): fixture, DALI group and virtual group turn-on and turn-off use the
+   command table and the colour skip; remove `use_hub_device_level_for_brightness`.
+4. **Colour state** (`coordinator.py`, `models.py`, `light.py`): the written-colour map overrides the hub colour in poll
+   and push merges; start-up driver colour read for never-written fixtures; restore through `RestoreEntity`; write
+   timestamps so older hub data cannot overwrite the immediate state; failure handling.
+5. **Queue and toggle**: per-target queue (latest waiting command wins), toggle from the intended state.
+6. **Docs and release prep**: `outputs/integration-notes/API.md` (raw colour path, the hub requests no longer used and
+   why), `README.md` if behaviour text changes, version 0.5.6 in `manifest.json` and `pyproject.toml`.
