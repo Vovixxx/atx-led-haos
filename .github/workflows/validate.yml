@@ -30,15 +30,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # HACS "topics" checks GitHub About metadata, not git. This repo
-          # currently has no topics, which is the only failing Validate
-          # check (hassfest, tests, and the other 8 HACS checks pass).
-          # Topics cannot be set from a commit or GITHUB_TOKEN (needs
-          # repository Administration). Keep the rest of HACS validation
-          # gating PRs; add topics in GitHub About (for example hacs,
-          # home-assistant, custom-integration, dali) before submitting
-          # to hacs/default, then drop this ignore.
-          ignore: topics
 
   hassfest:
     runs-on: ubuntu-latest
